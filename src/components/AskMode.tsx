@@ -2,76 +2,120 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useSession } from "next-auth/react";
+import { AGENTS, AgentKey } from "@/lib/agents";
 
 interface Message {
   role: "user" | "assistant";
-  content: string;
+  content: Anthropic.MessageParam["content"];
+  displayText: string;
 }
 
-export default function AskMode() {
+// We use a minimal type here to avoid importing Anthropic client-side
+namespace Anthropic {
+  export interface MessageParam {
+    role: "user" | "assistant";
+    content:
+      | string
+      | Array<
+          | { type: "text"; text: string }
+          | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
+        >;
+  }
+}
+
+interface Props {
+  agentKey: AgentKey;
+  apiKey: string;
+  systemContent: string;
+  fileCount: number;
+  onNeedApiKey: () => void;
+}
+
+export default function AskMode({ agentKey, apiKey, systemContent, fileCount, onNeedApiKey }: Props) {
   const { data: session } = useSession();
-  const [apiKey, setApiKey] = useState("");
-  const [apiKeySet, setApiKeySet] = useState(false);
+  const agent = AGENTS[agentKey];
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState("");
   const [loading, setLoading] = useState(false);
-  const [loadingDocs, setLoadingDocs] = useState(false);
-  const [systemContent, setSystemContent] = useState("");
-  const [fileCount, setFileCount] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+
   const bottomRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSetApiKey = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!apiKey.trim()) return;
-    setLoadingDocs(true);
+  // Reset on agent change
+  useEffect(() => {
+    setMessages([]);
+    setSaved(false);
     setError("");
+  }, [agentKey]);
 
-    const res = await fetch("/api/github/load");
-    if (res.ok) {
-      const data = await res.json();
-      setSystemContent(data.content);
-      setFileCount(data.files.length);
-    }
-
-    setApiKeySet(true);
-    setLoadingDocs(false);
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setImagePreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
   };
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text && !imageFile) return;
+    if (!apiKey) { onNeedApiKey(); return; }
+    if (loading) return;
 
-    const newMessages: Message[] = [...messages, { role: "user", content: text }];
-    setMessages(newMessages);
+    // Build message content
+    let userContent: Anthropic.MessageParam["content"];
+    let displayText = text;
+
+    if (imageFile && imagePreview) {
+      const base64 = imagePreview.split(",")[1];
+      const parts: Array<{ type: "text"; text: string } | { type: "image"; source: { type: "base64"; media_type: string; data: string } }> = [];
+      if (text) parts.push({ type: "text", text });
+      parts.push({
+        type: "image",
+        source: { type: "base64", media_type: imageFile.type, data: base64 },
+      });
+      userContent = parts;
+      displayText = text ? `${text}\n[이미지 첨부]` : "[이미지 첨부]";
+    } else {
+      userContent = text;
+    }
+
+    const newMsg: Message = { role: "user", content: userContent, displayText };
+    const updatedMessages = [...messages, newMsg];
+    setMessages(updatedMessages);
     setInput("");
+    setImageFile(null);
+    setImagePreview("");
     setLoading(true);
     setError("");
 
-    const assistantMessage: Message = { role: "assistant", content: "" };
-    setMessages([...newMessages, assistantMessage]);
+    const assistantMsg: Message = { role: "assistant", content: "", displayText: "" };
+    setMessages([...updatedMessages, assistantMsg]);
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: newMessages,
+          messages: updatedMessages.map((m) => ({ role: m.role, content: m.content })),
           systemContent,
+          agentKey,
           apiKey,
         }),
       });
 
-      if (!res.ok) {
-        throw new Error("응답 오류");
-      }
+      if (!res.ok) throw new Error("응답 오류");
 
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
@@ -81,32 +125,32 @@ export default function AskMode() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") break;
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.text) {
-                fullText += parsed.text;
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  updated[updated.length - 1] = {
-                    role: "assistant",
-                    content: fullText,
-                  };
-                  return updated;
-                });
-              }
-              if (parsed.error) {
-                throw new Error(parsed.error);
-              }
-            } catch {}
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6);
+          if (data === "[DONE]") break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.text) {
+              fullText += parsed.text;
+              setMessages((prev) => {
+                const copy = [...prev];
+                copy[copy.length - 1] = {
+                  role: "assistant",
+                  content: fullText,
+                  displayText: fullText,
+                };
+                return copy;
+              });
+            }
+            if (parsed.error) throw new Error(parsed.error);
+          } catch (parseErr) {
+            if (parseErr instanceof SyntaxError) continue;
+            throw parseErr;
           }
         }
       }
@@ -118,7 +162,7 @@ export default function AskMode() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -131,20 +175,31 @@ export default function AskMode() {
     setError("");
 
     const today = new Date().toISOString().split("T")[0];
-    const firstUser = messages.find((m) => m.role === "user")?.content || "대화";
-    const topic = firstUser.slice(0, 40).replace(/[^가-힣a-zA-Z0-9]/g, "-");
-    const path = `outputs/QA-${today}-${topic}.md`;
-    const message = `docs: QA 대화 저장 (by ${session?.user?.name})`;
+    const firstQ = messages.find((m) => m.role === "user")?.displayText || "대화";
+    const topic = firstQ
+      .slice(0, 40)
+      .replace(/[^가-힣a-zA-Z0-9\s]/g, "")
+      .trim()
+      .replace(/\s+/g, "-");
 
-    const content = messages
-      .map((m) => `### ${m.role === "user" ? "Q" : "A"}\n\n${m.content}`)
-      .join("\n\n---\n\n");
-    const fullContent = `# QA 대화 (${today})\n\n작성자: ${session?.user?.name}\n\n---\n\n${content}`;
+    const path = `outputs/QA-${agent.name}-${today}-${topic}.md`;
+    const message = `docs: QA 대화 저장 [${agent.name}] (by ${session?.user?.name})`;
+
+    const content = [
+      `# QA 대화 — ${agent.name} (${today})`,
+      `작성자: ${session?.user?.name}`,
+      "",
+      "---",
+      "",
+      ...messages.map((m) =>
+        `### ${m.role === "user" ? "Q" : "A"}\n\n${m.displayText}`
+      ),
+    ].join("\n\n");
 
     const res = await fetch("/api/github/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, content: fullContent, message }),
+      body: JSON.stringify({ path, content, message }),
     });
 
     if (!res.ok) {
@@ -156,92 +211,61 @@ export default function AskMode() {
     setSaving(false);
   };
 
-  // API Key Setup Screen
-  if (!apiKeySet) {
-    return (
-      <div className="max-w-md mx-auto mt-8">
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-5 text-sm text-blue-700">
-          질문 모드는 Anthropic API 키가 필요합니다. 키는 세션에만 유지되며 저장되지 않습니다.
-        </div>
-        <form onSubmit={handleSetApiKey} className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Anthropic API 키
-            </label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-ant-..."
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={!apiKey.trim() || loadingDocs}
-            className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-          >
-            {loadingDocs && (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            )}
-            {loadingDocs ? "리서치 문서 로딩 중..." : "질문 시작하기"}
-          </button>
-        </form>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col h-[calc(100vh-220px)] min-h-[400px]">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-sm text-gray-500">
-          {fileCount > 0
-            ? `리서치 문서 ${fileCount}개 로드됨`
-            : "리서치 문서 없음 (general 응답)"}
-        </p>
-        {messages.length > 0 && (
+    <div className="flex flex-col h-[calc(100vh-280px)] min-h-[420px]">
+      {/* Info bar */}
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${agent.color.dot}`} />
+          <span className="text-xs text-gray-500">
+            {fileCount > 0
+              ? `${fileCount}개 문서 컨텍스트 로드됨`
+              : "축적된 문서 없음 (일반 PM 지식으로 답변)"}
+          </span>
+        </div>
+        {messages.length > 0 && !saved && (
           <button
             onClick={handleSaveConversation}
-            disabled={saving || saved}
-            className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-1"
+            disabled={saving}
+            className="px-3 py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700 disabled:opacity-40 transition-colors flex items-center gap-1"
           >
-            {saving && (
-              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            )}
-            {saved ? "저장 완료!" : saving ? "저장 중..." : "이 대화 저장"}
+            {saving && <div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+            {saving ? "저장 중..." : "이 대화 저장"}
           </button>
         )}
+        {saved && <span className="text-xs text-green-600 font-medium">대화 저장 완료!</span>}
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+      <div className="flex-1 overflow-y-auto space-y-3 pb-3">
         {messages.length === 0 && (
-          <div className="text-center py-16 text-gray-400">
-            <p className="text-4xl mb-3">💬</p>
-            <p className="text-sm">리서치 문서 기반으로 질문하세요</p>
+          <div className={`rounded-2xl p-5 border ${agent.color.bg} ${agent.color.border}`}>
+            <p className="text-sm font-medium text-gray-700 mb-1">{agent.emoji} {agent.name} 어시스턴트</p>
+            <p className="text-sm text-gray-500">
+              축적된 {agent.name} 산출물을 바탕으로 질문에 답합니다.<br />
+              이미지(와이어프레임, 스크린샷 등)도 첨부할 수 있어요.
+            </p>
           </div>
         )}
         {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
+          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
-              className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+              className={`max-w-[88%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
                 msg.role === "user"
-                  ? "bg-indigo-600 text-white rounded-br-sm"
-                  : "bg-white border border-gray-200 text-gray-800 rounded-bl-sm"
+                  ? "bg-gray-900 text-white rounded-br-sm"
+                  : `bg-white border ${agent.color.border} text-gray-800 rounded-bl-sm`
               }`}
             >
-              {msg.role === "assistant" && msg.content === "" ? (
-                <div className="flex gap-1">
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
+              {msg.role === "assistant" && msg.displayText === "" ? (
+                <div className="flex gap-1 py-0.5">
+                  <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce [animation-delay:0ms]" />
+                  <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce [animation-delay:150ms]" />
+                  <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce [animation-delay:300ms]" />
                 </div>
               ) : (
-                <pre className="whitespace-pre-wrap font-sans">{msg.content}</pre>
+                <pre className={`whitespace-pre-wrap font-sans ${loading && i === messages.length - 1 && msg.role === "assistant" ? "streaming-cursor" : ""}`}>
+                  {msg.displayText}
+                </pre>
               )}
             </div>
           </div>
@@ -256,22 +280,44 @@ export default function AskMode() {
         </div>
       )}
 
+      {/* Image preview */}
+      {imagePreview && (
+        <div className="mb-2 relative inline-flex">
+          <img src={imagePreview} alt="attach" className="h-16 w-auto rounded-lg border border-gray-200" />
+          <button
+            onClick={() => { setImageFile(null); setImagePreview(""); }}
+            className="absolute -top-1 -right-1 w-5 h-5 bg-gray-700 text-white rounded-full text-xs flex items-center justify-center"
+          >×</button>
+        </div>
+      )}
+
       {/* Input */}
       <div className="border-t border-gray-200 pt-3">
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-end">
+          <button
+            onClick={() => imageInputRef.current?.click()}
+            className="flex-shrink-0 p-2.5 text-gray-400 hover:text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors"
+            title="이미지 첨부"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </button>
+          <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+
           <textarea
-            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="질문을 입력하세요... (Enter로 전송, Shift+Enter 줄바꿈)"
-            className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 max-h-32"
+            placeholder={`${agent.name} 관련 질문을 입력하세요... (Enter 전송, Shift+Enter 줄바꿈)`}
+            className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 max-h-32"
             rows={2}
           />
           <button
             onClick={handleSend}
-            disabled={loading || !input.trim()}
-            className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors flex-shrink-0"
+            disabled={loading || (!input.trim() && !imageFile)}
+            className={`flex-shrink-0 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-40 ${agent.color.button}`}
           >
             전송
           </button>

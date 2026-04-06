@@ -9,11 +9,8 @@ export async function POST(req: NextRequest) {
   }
 
   const { code } = await req.json();
-  const teamPassword = process.env.TEAM_PASSWORD;
-
-  if (code === teamPassword) {
+  if (code === process.env.TEAM_PASSWORD) {
     return NextResponse.json({ success: true });
   }
-
   return NextResponse.json({ error: "Invalid code" }, { status: 403 });
 }
