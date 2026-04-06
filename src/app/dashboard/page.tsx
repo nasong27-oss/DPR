@@ -4,76 +4,152 @@ import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { AGENTS, AgentKey } from "@/lib/agents";
-import FileList from "@/components/FileList";
-import SaveMode from "@/components/SaveMode";
-import AskMode from "@/components/AskMode";
-
-type Mode = "save" | "ask";
+import { AgentWithContent, AgentMeta, ModelType } from "@/types";
+import AgentChat from "@/components/AgentChat";
+import ApiKeyModal from "@/components/ApiKeyModal";
+import DeleteModal from "@/components/DeleteModal";
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  const [agentKey, setAgentKey] = useState<AgentKey>("research");
-  const [mode, setMode] = useState<Mode>("save");
-  const [files, setFiles] = useState<string[]>([]);
-  const [sharedFiles, setSharedFiles] = useState<string[]>([]);
-  const [systemContent, setSystemContent] = useState("");
-  const [loadingFiles, setLoadingFiles] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [agents, setAgents] = useState<AgentWithContent[]>([]);
+  const [masterPrompt, setMasterPrompt] = useState("");
+  const [loadingData, setLoadingData] = useState(true);
+  const [activeTab, setActiveTab] = useState<"master" | string>("master");
 
-  // API key state (shared across modes)
-  const [apiKey, setApiKey] = useState("");
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState("");
+  // API keys
+  const [claudeKey, setClaudeKey] = useState("");
+  const [geminiKey, setGeminiKey] = useState("");
+  const [showApiModal, setShowApiModal] = useState(false);
+
+  // Model
+  const [selectedModel, setSelectedModel] = useState<ModelType>("gemini");
+
+  // Delete modal
+  const [deleteTarget, setDeleteTarget] = useState<AgentMeta | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Master regen loading
+  const [masterRegenLoading, setMasterRegenLoading] = useState(false);
 
   // Auth check
   useEffect(() => {
     if (status === "unauthenticated") { router.push("/"); return; }
     if (status === "authenticated") {
-      if (sessionStorage.getItem("team_verified") !== "true") router.push("/auth/team-code");
-      else {
-        const saved = sessionStorage.getItem("anthropic_api_key");
-        if (saved) setApiKey(saved);
+      if (sessionStorage.getItem("team_verified") !== "true") {
+        router.push("/auth/team-code");
+        return;
       }
+      // Load keys
+      const ck = sessionStorage.getItem("claude_key") || "";
+      const gk = sessionStorage.getItem("gemini_key") || "";
+      setClaudeKey(ck);
+      setGeminiKey(gk);
+      if (!ck && !gk) setShowApiModal(true);
+      // Default model based on what's available
+      if (gk) setSelectedModel("gemini");
+      else if (ck) setSelectedModel("claude");
     }
   }, [status, router]);
 
-  // Load files when agent changes
-  const loadFiles = useCallback(async (key: AgentKey) => {
-    setLoadingFiles(true);
-    setFiles([]);
-    setSharedFiles([]);
-    setSystemContent("");
+  const loadData = useCallback(async () => {
+    setLoadingData(true);
     try {
-      const res = await fetch(`/api/github/load?folder=${AGENTS[key].folder}`);
+      const res = await fetch("/api/github/load");
       if (res.ok) {
         const data = await res.json();
-        setFiles(data.files || []);
-        setSharedFiles(data.sharedFiles || []);
-        setSystemContent(data.content || "");
+        setAgents(data.agents || []);
+        setMasterPrompt(data.masterPrompt || "");
       }
     } catch {}
-    setLoadingFiles(false);
+    setLoadingData(false);
   }, []);
 
   useEffect(() => {
     if (status === "authenticated" && sessionStorage.getItem("team_verified") === "true") {
-      loadFiles(agentKey);
+      loadData();
     }
-  }, [agentKey, status, loadFiles]);
+  }, [status, loadData]);
 
-  const handleApiKeySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!apiKeyInput.trim()) return;
-    setApiKey(apiKeyInput.trim());
-    sessionStorage.setItem("anthropic_api_key", apiKeyInput.trim());
-    setShowApiKeyModal(false);
-    setApiKeyInput("");
+  const handleApiKeySave = (ck: string, gk: string) => {
+    setClaudeKey(ck);
+    setGeminiKey(gk);
+    if (ck) sessionStorage.setItem("claude_key", ck);
+    else sessionStorage.removeItem("claude_key");
+    if (gk) sessionStorage.setItem("gemini_key", gk);
+    else sessionStorage.removeItem("gemini_key");
+    if (gk) setSelectedModel("gemini");
+    else if (ck) setSelectedModel("claude");
+    setShowApiModal(false);
   };
 
-  const agent = AGENTS[agentKey];
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+
+    const res = await fetch("/api/github/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: deleteTarget.id }),
+    });
+
+    if (res.ok) {
+      setAgents((prev) => prev.filter((a) => a.meta.id !== deleteTarget.id));
+      if (activeTab === deleteTarget.id) setActiveTab("master");
+      setDeleteTarget(null);
+      // Regenerate master
+      regenMaster();
+    }
+    setDeleteLoading(false);
+  };
+
+  const handleExcludeConfirm = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+
+    const res = await fetch("/api/github/exclude", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: deleteTarget.id }),
+    });
+
+    if (res.ok) {
+      setAgents((prev) => prev.filter((a) => a.meta.id !== deleteTarget.id));
+      if (activeTab === deleteTarget.id) setActiveTab("master");
+      setDeleteTarget(null);
+      regenMaster();
+    }
+    setDeleteLoading(false);
+  };
+
+  const regenMaster = async () => {
+    if (!claudeKey && !geminiKey) return;
+    setMasterRegenLoading(true);
+    const res = await fetch("/api/agent/master", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ geminiKey, claudeKey }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setMasterPrompt(data.masterPrompt || "");
+    }
+    setMasterRegenLoading(false);
+  };
+
+  const userEmail = session?.user?.email || "";
+
+  const apiStatus = () => {
+    if (claudeKey && geminiKey) return { label: "🤖✨ 모두 연결됨", color: "text-green-600 bg-green-50 border-green-200" };
+    if (geminiKey) return { label: "✨ Gemini 연결됨", color: "text-blue-600 bg-blue-50 border-blue-200" };
+    if (claudeKey) return { label: "🤖 Claude 연결됨", color: "text-purple-600 bg-purple-50 border-purple-200" };
+    return { label: "API 키 없음", color: "text-gray-500 bg-gray-50 border-gray-200" };
+  };
+
+  const status2 = apiStatus();
+
+  const activeAgent = agents.find((a) => a.meta.id === activeTab);
 
   if (status === "loading") {
     return (
@@ -87,212 +163,179 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-purple-600 flex-shrink-0" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
+          <div className="flex items-center gap-2 mr-auto">
+            <div className="w-7 h-7 rounded-lg bg-slate-900 flex-shrink-0" />
             <span className="font-semibold text-gray-900 text-sm hidden sm:block">PM 에이전트 허브</span>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* API key indicator */}
+          {masterRegenLoading && (
+            <span className="text-xs text-gray-400 flex items-center gap-1">
+              <div className="w-3 h-3 border border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+              마스터 재생성 중
+            </span>
+          )}
+
+          {/* API status */}
+          <button
+            onClick={() => setShowApiModal(true)}
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border transition-colors ${status2.color}`}
+          >
+            {status2.label}
+          </button>
+
+          {/* Register button */}
+          <Link
+            href="/register"
+            className="px-3 py-1.5 bg-slate-900 text-white text-xs rounded-lg hover:bg-slate-800 transition-colors hidden sm:block"
+          >
+            + 에이전트 등록
+          </Link>
+
+          {/* User + logout */}
+          <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
+            <span className="text-sm text-gray-600 hidden md:block">{session?.user?.name}</span>
             <button
-              onClick={() => setShowApiKeyModal(true)}
-              className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border transition-colors ${
-                apiKey
-                  ? "border-green-200 bg-green-50 text-green-700"
-                  : "border-gray-300 text-gray-500 hover:bg-gray-50"
-              }`}
+              onClick={() => { sessionStorage.clear(); signOut({ callbackUrl: "/" }); }}
+              className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-100"
             >
-              <div className={`w-1.5 h-1.5 rounded-full ${apiKey ? "bg-green-500" : "bg-gray-400"}`} />
-              {apiKey ? "API 키 설정됨" : "API 키 설정"}
+              로그아웃
             </button>
-
-            <Link
-              href="/guide"
-              className="hidden sm:flex items-center gap-1 px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              가이드
-            </Link>
-
-            <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
-              <span className="text-sm text-gray-600 hidden md:block">{session?.user?.name}</span>
-              <button
-                onClick={() => { sessionStorage.clear(); signOut({ callbackUrl: "/" }); }}
-                className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
-              >
-                로그아웃
-              </button>
-            </div>
           </div>
         </div>
       </header>
 
-      {/* Agent tabs */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="flex gap-1">
-            {Object.values(AGENTS).map((a) => (
-              <button
-                key={a.key}
-                onClick={() => { setAgentKey(a.key); setSidebarOpen(false); }}
-                className={`flex items-center gap-2 px-4 sm:px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${
-                  agentKey === a.key
-                    ? `${a.color.activeBorder} ${a.color.text}`
-                    : "border-transparent text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                <span>{a.emoji}</span>
-                <span className="hidden sm:inline">{a.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Main layout */}
-      <div className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-5 flex gap-5">
-        {/* Sidebar toggle (mobile) */}
+      {/* Mobile action bar */}
+      <div className="sm:hidden bg-white border-b border-gray-200 px-4 py-2 flex gap-2">
         <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className={`fixed bottom-5 left-5 z-40 sm:hidden flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium text-white ${agent.color.button}`}
+          onClick={() => setShowApiModal(true)}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs border ${status2.color}`}
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          파일 ({files.length})
+          {status2.label}
         </button>
-
-        {/* Sidebar overlay (mobile) */}
-        {sidebarOpen && (
-          <div
-            className="fixed inset-0 z-30 bg-black/30 sm:hidden"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
-
-        {/* Sidebar */}
-        <aside
-          className={`
-            fixed sm:relative left-0 top-0 h-full sm:h-auto z-40 sm:z-auto
-            w-64 sm:w-56 flex-shrink-0
-            bg-white sm:bg-white border-r sm:border sm:rounded-2xl border-gray-200 p-4
-            transition-transform sm:translate-x-0
-            ${sidebarOpen ? "translate-x-0 shadow-xl" : "-translate-x-full"}
-            sm:block
-          `}
+        <Link
+          href="/register"
+          className="flex-1 flex items-center justify-center py-1.5 bg-slate-900 text-white text-xs rounded-lg"
         >
-          <div className="pt-14 sm:pt-0">
-            <FileList
-              agentKey={agentKey}
-              files={files}
-              sharedFiles={sharedFiles}
-              loading={loadingFiles}
-              onRefresh={() => loadFiles(agentKey)}
-            />
-          </div>
-        </aside>
-
-        {/* Main panel */}
-        <main className="flex-1 min-w-0">
-          <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
-            {/* Mode toggle */}
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-                <button
-                  onClick={() => setMode("save")}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    mode === "save" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  저장 모드
-                </button>
-                <button
-                  onClick={() => setMode("ask")}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    mode === "ask" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  질문 모드
-                </button>
-              </div>
-
-              {/* Mobile API key */}
-              <button
-                onClick={() => setShowApiKeyModal(true)}
-                className={`sm:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border transition-colors ${
-                  apiKey
-                    ? "border-green-200 bg-green-50 text-green-700"
-                    : "border-gray-300 text-gray-500"
-                }`}
-              >
-                <div className={`w-1.5 h-1.5 rounded-full ${apiKey ? "bg-green-500" : "bg-gray-400"}`} />
-                {apiKey ? "API 설정됨" : "API 키"}
-              </button>
-            </div>
-
-            {mode === "save" ? (
-              <SaveMode
-                agentKey={agentKey}
-                apiKey={apiKey}
-                onNeedApiKey={() => setShowApiKeyModal(true)}
-              />
-            ) : (
-              <AskMode
-                agentKey={agentKey}
-                apiKey={apiKey}
-                systemContent={systemContent}
-                fileCount={files.length}
-                onNeedApiKey={() => setShowApiKeyModal(true)}
-              />
-            )}
-          </div>
-        </main>
+          + 에이전트 등록
+        </Link>
       </div>
 
-      {/* API Key Modal */}
-      {showApiKeyModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-1">Anthropic API 키</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              세션에만 유지되며 서버에 저장되지 않습니다.
-            </p>
-            <form onSubmit={handleApiKeySubmit} className="space-y-3">
-              <input
-                type="password"
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                placeholder="sk-ant-..."
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                autoFocus
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowApiKeyModal(false)}
-                  className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm hover:bg-gray-50 transition-colors"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  disabled={!apiKeyInput.trim()}
-                  className="flex-1 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 disabled:opacity-40 transition-colors"
-                >
-                  설정
-                </button>
+      {/* Tab bar */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 overflow-x-auto">
+          <div className="flex gap-0 min-w-max">
+            {/* Master tab */}
+            <button
+              onClick={() => setActiveTab("master")}
+              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors flex-shrink-0 ${
+                activeTab === "master"
+                  ? "border-slate-900 text-slate-900 bg-slate-50"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              <span className="text-base">★</span>
+              <span>마스터</span>
+            </button>
+
+            {loadingData ? (
+              <div className="flex items-center px-4 gap-2">
+                {[1, 2].map((i) => (
+                  <div key={i} className="h-5 w-20 bg-gray-100 rounded animate-pulse" />
+                ))}
               </div>
-            </form>
-            {apiKey && (
-              <button
-                onClick={() => { setApiKey(""); sessionStorage.removeItem("anthropic_api_key"); setShowApiKeyModal(false); }}
-                className="mt-3 w-full text-center text-xs text-red-400 hover:text-red-600"
-              >
-                현재 키 삭제
-              </button>
+            ) : (
+              agents.map((agent) => (
+                <button
+                  key={agent.meta.id}
+                  onClick={() => setActiveTab(agent.meta.id)}
+                  className={`flex items-center gap-2 px-4 py-3.5 text-sm border-b-2 transition-colors flex-shrink-0 ${
+                    activeTab === agent.meta.id
+                      ? "border-slate-700 text-slate-900 font-medium"
+                      : "border-transparent text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  <span className="font-medium">{agent.meta.name}</span>
+                  <span className="text-xs text-gray-400 hidden sm:block">{agent.meta.owner}</span>
+                </button>
+              ))
             )}
           </div>
         </div>
+      </div>
+
+      {/* Main content */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6">
+        <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
+          {loadingData ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="text-center">
+                <div className="w-8 h-8 border-2 border-gray-200 border-t-gray-700 rounded-full animate-spin mx-auto mb-3" />
+                <p className="text-sm text-gray-500">에이전트 로딩 중...</p>
+              </div>
+            </div>
+          ) : activeTab === "master" ? (
+            <AgentChat
+              key="master"
+              agentName="★ 마스터 에이전트"
+              agentDescription={`${agents.length}개 에이전트 통합 · 전체 PM 역량을 하나로`}
+              systemPrompt={masterPrompt}
+              claudeKey={claudeKey}
+              geminiKey={geminiKey}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+            />
+          ) : activeAgent ? (
+            <AgentChat
+              key={activeAgent.meta.id}
+              agentId={activeAgent.meta.id}
+              agentName={activeAgent.meta.name}
+              agentDescription={activeAgent.meta.description}
+              agentOwner={activeAgent.meta.owner}
+              systemPrompt={activeAgent.refinedPrompt}
+              claudeKey={claudeKey}
+              geminiKey={geminiKey}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+              isOwner={activeAgent.meta.email === userEmail}
+              onEdit={() =>
+                router.push(`/register?id=${activeAgent.meta.id}`)
+              }
+              onDelete={() => setDeleteTarget(activeAgent.meta)}
+            />
+          ) : (
+            <div className="text-center py-16 text-gray-400">
+              <p className="text-4xl mb-3">🤖</p>
+              <p>에이전트를 선택하거나 새로 등록하세요</p>
+              <Link
+                href="/register"
+                className="inline-block mt-4 px-5 py-2.5 bg-slate-900 text-white text-sm rounded-xl hover:bg-slate-800"
+              >
+                + 첫 에이전트 등록하기
+              </Link>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Modals */}
+      {showApiModal && (
+        <ApiKeyModal
+          initialClaude={claudeKey}
+          initialGemini={geminiKey}
+          onSave={handleApiKeySave}
+          onClose={() => setShowApiModal(false)}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteModal
+          agent={deleteTarget}
+          onDelete={handleDeleteConfirm}
+          onExclude={handleExcludeConfirm}
+          onClose={() => setDeleteTarget(null)}
+          loading={deleteLoading}
+        />
       )}
     </div>
   );
