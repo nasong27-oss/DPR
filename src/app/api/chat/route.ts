@@ -49,22 +49,14 @@ export async function POST(req: NextRequest) {
 
       try {
         if (useGemini) {
-          const { GoogleGenerativeAI, DynamicRetrievalMode } = await import("@google/generative-ai");
+          const { GoogleGenerativeAI } = await import("@google/generative-ai");
           const genAI = new GoogleGenerativeAI(geminiKey);
           const geminiModel = genAI.getGenerativeModel({
             model: modelId || "gemini-2.5-flash",
             systemInstruction: systemPrompt || undefined,
-            // Enable Google Search grounding so the model fetches real-time web data
-            tools: [
-              {
-                googleSearchRetrieval: {
-                  dynamicRetrievalConfig: {
-                    mode: DynamicRetrievalMode.MODE_DYNAMIC,
-                    dynamicThreshold: 0.3, // search when ≥30% likely to need current info
-                  },
-                },
-              },
-            ],
+            // Gemini 2.0+ uses googleSearch (not googleSearchRetrieval)
+            // @ts-expect-error googleSearch not in SDK 0.24.x types yet
+            tools: [{ googleSearch: {} }],
           });
 
           const history = messages.slice(0, -1).map((m: ChatMessage) => ({
