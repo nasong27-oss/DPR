@@ -250,7 +250,7 @@ export default function AgentChat({
                 className="text-sm border border-gray-300 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-400 bg-white"
               >
                 {geminiModels.length > 0 && (
-                  <optgroup label="✨ Gemini">
+                  <optgroup label="✨ Gemini (웹 검색 포함)">
                     {geminiModels.map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.label} ({m.cost})
@@ -270,7 +270,7 @@ export default function AgentChat({
               </select>
             ) : (
               <span className="text-xs text-gray-500">
-                {hasGemini ? `✨ ${currentModelLabel}` : `🤖 ${currentModelLabel}`}
+                {hasGemini ? `✨ ${currentModelLabel} · 웹 검색` : `🤖 ${currentModelLabel}`}
               </span>
             )}
 
