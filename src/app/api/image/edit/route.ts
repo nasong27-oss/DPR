@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { getKeysFromCookie } from "@/lib/getKeysFromCookie";
 
 function formatGeminiError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
@@ -19,12 +20,17 @@ function formatGeminiError(err: unknown): string {
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session?.user?.email)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { imageBase64, imageMimeType, instruction, geminiKey } = await req.json();
-  if (!geminiKey) return NextResponse.json({ error: "Gemini API 키가 필요합니다." }, { status: 400 });
+  const { imageBase64, imageMimeType, instruction } = await req.json();
   if (!imageBase64 || !instruction)
     return NextResponse.json({ error: "이미지와 수정 지시가 필요합니다." }, { status: 400 });
+
+  const keys = await getKeysFromCookie(session.user.email);
+  const geminiKey = keys?.geminiKey || "";
+  if (!geminiKey)
+    return NextResponse.json({ error: "Gemini API 키가 필요합니다." }, { status: 400 });
 
   try {
     const { GoogleGenerativeAI } = await import("@google/generative-ai");

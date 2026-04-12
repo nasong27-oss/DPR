@@ -4,7 +4,8 @@ import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { AgentWithContent, AgentMeta, ModelType } from "@/types";
+import { AgentWithContent, AgentMeta, ModelId } from "@/types";
+import { getDefaultModelId } from "@/lib/models";
 import AgentChat from "@/components/AgentChat";
 import ApiKeyModal from "@/components/ApiKeyModal";
 import DeleteModal from "@/components/DeleteModal";
@@ -18,13 +19,13 @@ export default function Dashboard() {
   const [loadingData, setLoadingData] = useState(true);
   const [activeTab, setActiveTab] = useState<"master" | string>("master");
 
-  // API keys
-  const [claudeKey, setClaudeKey] = useState("");
-  const [geminiKey, setGeminiKey] = useState("");
+  // API key status (booleans only — actual keys stay server-side in encrypted cookie)
+  const [hasClaude, setHasClaude] = useState(false);
+  const [hasGemini, setHasGemini] = useState(false);
   const [showApiModal, setShowApiModal] = useState(false);
 
   // Model
-  const [selectedModel, setSelectedModel] = useState<ModelType>("gemini");
+  const [selectedModel, setSelectedModel] = useState<ModelId>("gemini-2.5-flash");
 
   // Delete modal
   const [deleteTarget, setDeleteTarget] = useState<AgentMeta | null>(null);
@@ -33,7 +34,7 @@ export default function Dashboard() {
   // Master regen loading
   const [masterRegenLoading, setMasterRegenLoading] = useState(false);
 
-  // Auth check
+  // Auth check + key status
   useEffect(() => {
     if (status === "unauthenticated") { router.push("/"); return; }
     if (status === "authenticated") {
@@ -41,15 +42,15 @@ export default function Dashboard() {
         router.push("/auth/team-code");
         return;
       }
-      // Load keys
-      const ck = sessionStorage.getItem("claude_key") || "";
-      const gk = sessionStorage.getItem("gemini_key") || "";
-      setClaudeKey(ck);
-      setGeminiKey(gk);
-      if (!ck && !gk) setShowApiModal(true);
-      // Default model based on what's available
-      if (gk) setSelectedModel("gemini");
-      else if (ck) setSelectedModel("claude");
+      // Fetch key status (checks cookie, falls back to GitHub)
+      fetch("/api/keys/status")
+        .then((r) => r.ok ? r.json() : { hasClaude: false, hasGemini: false })
+        .then((data) => {
+          setHasClaude(data.hasClaude);
+          setHasGemini(data.hasGemini);
+          if (!data.hasClaude && !data.hasGemini) setShowApiModal(true);
+          setSelectedModel(getDefaultModelId(data.hasClaude, data.hasGemini) || "gemini-2.5-flash");
+        });
     }
   }, [status, router]);
 
@@ -72,15 +73,10 @@ export default function Dashboard() {
     }
   }, [status, loadData]);
 
-  const handleApiKeySave = (ck: string, gk: string) => {
-    setClaudeKey(ck);
-    setGeminiKey(gk);
-    if (ck) sessionStorage.setItem("claude_key", ck);
-    else sessionStorage.removeItem("claude_key");
-    if (gk) sessionStorage.setItem("gemini_key", gk);
-    else sessionStorage.removeItem("gemini_key");
-    if (gk) setSelectedModel("gemini");
-    else if (ck) setSelectedModel("claude");
+  const handleApiKeySave = (newHasClaude: boolean, newHasGemini: boolean) => {
+    setHasClaude(newHasClaude);
+    setHasGemini(newHasGemini);
+    setSelectedModel(getDefaultModelId(newHasClaude, newHasGemini) || selectedModel);
     setShowApiModal(false);
   };
 
@@ -98,7 +94,6 @@ export default function Dashboard() {
       setAgents((prev) => prev.filter((a) => a.meta.id !== deleteTarget.id));
       if (activeTab === deleteTarget.id) setActiveTab("master");
       setDeleteTarget(null);
-      // Regenerate master
       regenMaster();
     }
     setDeleteLoading(false);
@@ -124,12 +119,12 @@ export default function Dashboard() {
   };
 
   const regenMaster = async () => {
-    if (!claudeKey && !geminiKey) return;
+    if (!hasClaude && !hasGemini) return;
     setMasterRegenLoading(true);
     const res = await fetch("/api/agent/master", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ geminiKey, claudeKey }),
+      body: JSON.stringify({}),
     });
     if (res.ok) {
       const data = await res.json();
@@ -141,9 +136,9 @@ export default function Dashboard() {
   const userEmail = session?.user?.email || "";
 
   const apiStatus = () => {
-    if (claudeKey && geminiKey) return { label: "🤖✨ 모두 연결됨", color: "text-green-600 bg-green-50 border-green-200" };
-    if (geminiKey) return { label: "✨ Gemini 연결됨", color: "text-blue-600 bg-blue-50 border-blue-200" };
-    if (claudeKey) return { label: "🤖 Claude 연결됨", color: "text-purple-600 bg-purple-50 border-purple-200" };
+    if (hasClaude && hasGemini) return { label: "🤖✨ 모두 연결됨", color: "text-green-600 bg-green-50 border-green-200" };
+    if (hasGemini) return { label: "✨ Gemini 연결됨", color: "text-blue-600 bg-blue-50 border-blue-200" };
+    if (hasClaude) return { label: "🤖 Claude 연결됨", color: "text-purple-600 bg-purple-50 border-purple-200" };
     return { label: "API 키 없음", color: "text-gray-500 bg-gray-50 border-gray-200" };
   };
 
@@ -280,8 +275,8 @@ export default function Dashboard() {
               agentName="★ 마스터 에이전트"
               agentDescription={`${agents.length}개 에이전트 통합 · 전체 PM 역량을 하나로`}
               systemPrompt={masterPrompt}
-              claudeKey={claudeKey}
-              geminiKey={geminiKey}
+              hasClaude={hasClaude}
+              hasGemini={hasGemini}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
             />
@@ -293,14 +288,12 @@ export default function Dashboard() {
               agentDescription={activeAgent.meta.description}
               agentOwner={activeAgent.meta.owner}
               systemPrompt={activeAgent.refinedPrompt}
-              claudeKey={claudeKey}
-              geminiKey={geminiKey}
+              hasClaude={hasClaude}
+              hasGemini={hasGemini}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
               isOwner={activeAgent.meta.email === userEmail}
-              onEdit={() =>
-                router.push(`/register?id=${activeAgent.meta.id}`)
-              }
+              onEdit={() => router.push(`/register?id=${activeAgent.meta.id}`)}
               onDelete={() => setDeleteTarget(activeAgent.meta)}
             />
           ) : (
@@ -321,8 +314,8 @@ export default function Dashboard() {
       {/* Modals */}
       {showApiModal && (
         <ApiKeyModal
-          initialClaude={claudeKey}
-          initialGemini={geminiKey}
+          hasClaude={hasClaude}
+          hasGemini={hasGemini}
           onSave={handleApiKeySave}
           onClose={() => setShowApiModal(false)}
         />

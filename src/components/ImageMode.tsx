@@ -3,14 +3,14 @@
 import { useState, useRef } from "react";
 
 interface Props {
-  geminiKey: string;
+  hasGemini: boolean;
   agentId: string;
   onNeedGemini: () => void;
 }
 
 type ImageTab = "generate" | "edit";
 
-export default function ImageMode({ geminiKey, agentId, onNeedGemini }: Props) {
+export default function ImageMode({ hasGemini, agentId, onNeedGemini }: Props) {
   const [tab, setTab] = useState<ImageTab>("generate");
 
   // Generate state
@@ -30,7 +30,7 @@ export default function ImageMode({ geminiKey, agentId, onNeedGemini }: Props) {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  if (!geminiKey) {
+  if (!hasGemini) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <div className="text-5xl mb-4">🖼️</div>
@@ -65,7 +65,7 @@ export default function ImageMode({ geminiKey, agentId, onNeedGemini }: Props) {
     const res = await fetch("/api/image/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: genPrompt, geminiKey }),
+      body: JSON.stringify({ prompt: genPrompt }),
     });
 
     const data = await res.json();
@@ -103,7 +103,6 @@ export default function ImageMode({ geminiKey, agentId, onNeedGemini }: Props) {
         imageBase64: editImageB64,
         imageMimeType: editImageMime,
         instruction: editInstruction,
-        geminiKey,
       }),
     });
 

@@ -36,9 +36,6 @@ function RegisterForm() {
   const [error, setError] = useState("");
   const [existingMeta, setExistingMeta] = useState<AgentMeta | null>(null);
 
-  const claudeKey = typeof window !== "undefined" ? sessionStorage.getItem("claude_key") || "" : "";
-  const geminiKey = typeof window !== "undefined" ? sessionStorage.getItem("gemini_key") || "" : "";
-
   useEffect(() => {
     if (status === "unauthenticated") { router.push("/"); return; }
     if (status === "authenticated" && sessionStorage.getItem("team_verified") !== "true") {
@@ -66,24 +63,15 @@ function RegisterForm() {
 
   const handleRefine = async () => {
     if (!originalPrompt.trim() && !editId) return;
-    if (!geminiKey && !claudeKey) {
-      setError("API 키가 필요합니다. 대시보드에서 API 키를 먼저 설정해주세요.");
-      return;
-    }
 
     setLoading(true);
     setError("");
 
-    // Load existing feedback if editing
-    let feedback = "";
-    if (editId) {
-      const feedbackRes = await fetch(`/api/github/load`);
-      // Use existing refined if no new prompt
-      if (!originalPrompt.trim()) {
-        setStep("preview");
-        setLoading(false);
-        return;
-      }
+    // If editing without new prompt, skip to preview
+    if (editId && !originalPrompt.trim()) {
+      setStep("preview");
+      setLoading(false);
+      return;
     }
 
     const res = await fetch("/api/agent/refine", {
@@ -93,9 +81,7 @@ function RegisterForm() {
         originalPrompt,
         agentName: name,
         description,
-        feedback,
-        geminiKey,
-        claudeKey,
+        feedback: "",
       }),
     });
 
@@ -148,14 +134,12 @@ function RegisterForm() {
       : `docs: add agent ${agentId}`;
 
     try {
-      // Commit all files
       const files = [
         { path: `registry/${agentId}/meta.json`, content: JSON.stringify(meta, null, 2) },
         { path: `registry/${agentId}/refined.md`, content: refined },
         ...(originalPrompt.trim()
           ? [{ path: `registry/${agentId}/prompt.md`, content: originalPrompt }]
           : []),
-        // Create empty feedback if new agent
         ...(!editId
           ? [{ path: `registry/${agentId}/feedback.md`, content: "# 피드백\n" }]
           : []),
@@ -170,11 +154,11 @@ function RegisterForm() {
         if (!res.ok) throw new Error(`Failed to save ${file.path}`);
       }
 
-      // Regenerate master prompt
+      // Regenerate master prompt (keys come from server-side cookie)
       await fetch("/api/agent/master", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ geminiKey, claudeKey }),
+        body: JSON.stringify({}),
       });
 
       router.push("/dashboard");

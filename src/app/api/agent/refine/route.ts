@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { getKeysFromCookie } from "@/lib/getKeysFromCookie";
 
 const REFINE_SYSTEM = `당신은 AI 에이전트 프롬프트 전문가입니다.
 주어진 원본 프롬프트를 다음 기준으로 개선하세요:
@@ -14,13 +15,20 @@ const REFINE_SYSTEM = `당신은 AI 에이전트 프롬프트 전문가입니다
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session?.user?.email)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { originalPrompt, agentName, description, feedback, geminiKey, claudeKey } =
-    await req.json();
+  const { originalPrompt, agentName, description, feedback } = await req.json();
 
   if (!originalPrompt)
     return NextResponse.json({ error: "originalPrompt required" }, { status: 400 });
+
+  const keys = await getKeysFromCookie(session.user.email);
+  const geminiKey = keys?.geminiKey || "";
+  const claudeKey = keys?.claudeKey || "";
+
+  if (!geminiKey && !claudeKey)
+    return NextResponse.json({ error: "API 키가 필요합니다. 키를 먼저 등록해주세요." }, { status: 400 });
 
   const userPrompt = `에이전트 이름: ${agentName}
 설명: ${description}
@@ -38,23 +46,21 @@ ${feedback ? `\n익명 피드백:\n${feedback}` : ""}
       const { GoogleGenerativeAI } = await import("@google/generative-ai");
       const genAI = new GoogleGenerativeAI(geminiKey);
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash",
         systemInstruction: REFINE_SYSTEM,
       });
       const result = await model.generateContent(userPrompt);
       refined = result.response.text();
-    } else if (claudeKey) {
+    } else {
       const Anthropic = (await import("@anthropic-ai/sdk")).default;
       const anthropic = new Anthropic({ apiKey: claudeKey });
       const msg = await anthropic.messages.create({
-        model: "claude-opus-4-6",
+        model: "claude-sonnet-4-6",
         max_tokens: 2048,
         system: REFINE_SYSTEM,
         messages: [{ role: "user", content: userPrompt }],
       });
       refined = msg.content[0].type === "text" ? msg.content[0].text : "";
-    } else {
-      return NextResponse.json({ error: "API key required" }, { status: 400 });
     }
 
     return NextResponse.json({ refined });

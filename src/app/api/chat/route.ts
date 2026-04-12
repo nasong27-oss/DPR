@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { getKeysFromCookie } from "@/lib/getKeysFromCookie";
+import { getProviderFromModelId } from "@/lib/models";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -9,11 +11,21 @@ interface ChatMessage {
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session?.user) return new Response("Unauthorized", { status: 401 });
+  if (!session?.user?.email) return new Response("Unauthorized", { status: 401 });
 
-  const { messages, systemPrompt, model, geminiKey, claudeKey } = await req.json();
+  const { messages, systemPrompt, modelId } = await req.json();
   if (!messages?.length) return new Response("No messages", { status: 400 });
-  if (!geminiKey && !claudeKey) return new Response("API key required", { status: 400 });
+
+  const keys = await getKeysFromCookie(session.user.email);
+  const claudeKey = keys?.claudeKey || "";
+  const geminiKey = keys?.geminiKey || "";
+
+  if (!geminiKey && !claudeKey)
+    return new Response("API key required", { status: 400 });
+
+  // Determine provider from modelId, fallback to available key
+  const provider = getProviderFromModelId(modelId) ?? (geminiKey ? "gemini" : "claude");
+  const useGemini = provider === "gemini" && !!geminiKey;
 
   const encoder = new TextEncoder();
 
@@ -36,17 +48,14 @@ export async function POST(req: NextRequest) {
       };
 
       try {
-        const useGemini = model === "gemini" || (!model && !!geminiKey);
-
-        if (useGemini && geminiKey) {
+        if (useGemini) {
           const { GoogleGenerativeAI } = await import("@google/generative-ai");
           const genAI = new GoogleGenerativeAI(geminiKey);
           const geminiModel = genAI.getGenerativeModel({
-            model: "gemini-2.0-flash",
+            model: modelId || "gemini-2.5-flash",
             systemInstruction: systemPrompt || undefined,
           });
 
-          // Convert messages to Gemini format
           const history = messages.slice(0, -1).map((m: ChatMessage) => ({
             role: m.role === "assistant" ? "model" : "user",
             parts: [{ text: m.content }],
@@ -66,7 +75,7 @@ export async function POST(req: NextRequest) {
           const anthropic = new Anthropic({ apiKey: claudeKey });
 
           const s = await anthropic.messages.stream({
-            model: "claude-opus-4-6",
+            model: modelId || "claude-sonnet-4-6",
             max_tokens: 2048,
             system: systemPrompt || undefined,
             messages: messages.map((m: ChatMessage) => ({

@@ -40,9 +40,7 @@ export default function TeamCodePage() {
     setLoading(false);
   };
 
-  const handleApiKeySave = (claudeKey: string, geminiKey: string) => {
-    if (claudeKey) sessionStorage.setItem("claude_key", claudeKey);
-    if (geminiKey) sessionStorage.setItem("gemini_key", geminiKey);
+  const handleApiKeySave = (_hasClaude: boolean, _hasGemini: boolean) => {
     setShowApiModal(false);
     router.push("/dashboard");
   };

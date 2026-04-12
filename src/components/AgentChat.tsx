@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { ModelType, ChatMessage } from "@/types";
+import { ModelId, ChatMessage } from "@/types";
+import { getAvailableModels, getDefaultModelId } from "@/lib/models";
 import ImageMode from "./ImageMode";
 import FeedbackSection from "./FeedbackSection";
 
@@ -12,10 +13,10 @@ interface Props {
   agentDescription?: string;
   agentOwner?: string;
   systemPrompt: string;
-  claudeKey: string;
-  geminiKey: string;
-  selectedModel: ModelType;
-  onModelChange: (m: ModelType) => void;
+  hasClaude: boolean;
+  hasGemini: boolean;
+  selectedModel: ModelId;
+  onModelChange: (m: ModelId) => void;
   isOwner?: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -29,8 +30,8 @@ export default function AgentChat({
   agentDescription,
   agentOwner,
   systemPrompt,
-  claudeKey,
-  geminiKey,
+  hasClaude,
+  hasGemini,
   selectedModel,
   onModelChange,
   isOwner,
@@ -47,12 +48,20 @@ export default function AgentChat({
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const hasAnyKey = hasClaude || hasGemini;
+  const availableModels = getAvailableModels(hasClaude, hasGemini);
+
+  // Sync selectedModel if it's not available for current keys
+  useEffect(() => {
+    const ids = availableModels.map((m) => m.id);
+    if (availableModels.length > 0 && !ids.includes(selectedModel)) {
+      onModelChange(getDefaultModelId(hasClaude, hasGemini));
+    }
+  }, [hasClaude, hasGemini]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  const bothKeys = !!(claudeKey && geminiKey);
-  const hasAnyKey = !!(claudeKey || geminiKey);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -74,9 +83,7 @@ export default function AgentChat({
         body: JSON.stringify({
           messages: newMessages,
           systemPrompt,
-          model: selectedModel,
-          geminiKey,
-          claudeKey,
+          modelId: selectedModel,
         }),
       });
 
@@ -168,6 +175,10 @@ export default function AgentChat({
     setSaving(false);
   };
 
+  const geminiModels = availableModels.filter((m) => m.provider === "gemini");
+  const claudeModels = availableModels.filter((m) => m.provider === "claude");
+  const currentModelLabel = availableModels.find((m) => m.id === selectedModel)?.label || selectedModel;
+
   return (
     <div>
       {/* Agent header */}
@@ -211,17 +222,17 @@ export default function AgentChat({
         </button>
         <button
           onClick={() => setSubTab("image")}
-          title={!geminiKey ? "Gemini API 키 필요" : undefined}
+          title={!hasGemini ? "Gemini API 키 필요" : undefined}
           className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors relative ${
             subTab === "image"
               ? "bg-white text-gray-900 shadow-sm"
-              : geminiKey
+              : hasGemini
               ? "text-gray-500 hover:text-gray-700"
               : "text-gray-300 cursor-not-allowed"
           }`}
         >
           🖼️ 이미지
-          {!geminiKey && (
+          {!hasGemini && (
             <span className="absolute -top-1 -right-1 w-2 h-2 bg-gray-400 rounded-full" />
           )}
         </button>
@@ -231,18 +242,34 @@ export default function AgentChat({
         <div>
           {/* Model selector + save button */}
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            {bothKeys ? (
+            {availableModels.length > 1 ? (
               <select
                 value={selectedModel}
-                onChange={(e) => onModelChange(e.target.value as ModelType)}
+                onChange={(e) => onModelChange(e.target.value)}
                 className="text-sm border border-gray-300 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-400 bg-white"
               >
-                <option value="gemini">✨ Gemini (기본값)</option>
-                <option value="claude">🤖 Claude</option>
+                {geminiModels.length > 0 && (
+                  <optgroup label="✨ Gemini">
+                    {geminiModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label} ({m.cost})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {claudeModels.length > 0 && (
+                  <optgroup label="🤖 Claude">
+                    {claudeModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label} ({m.cost})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             ) : (
               <span className="text-xs text-gray-500">
-                {geminiKey ? "✨ Gemini" : "🤖 Claude"}
+                {hasGemini ? `✨ ${currentModelLabel}` : `🤖 ${currentModelLabel}`}
               </span>
             )}
 
@@ -289,7 +316,8 @@ export default function AgentChat({
                       <pre
                         className={`whitespace-pre-wrap font-sans ${
                           loading && i === messages.length - 1 && msg.role === "assistant"
-                            ? "streaming-cursor" : ""
+                            ? "streaming-cursor"
+                            : ""
                         }`}
                       >
                         {msg.content}
@@ -313,7 +341,11 @@ export default function AgentChat({
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={hasAnyKey ? "메시지를 입력하세요... (Enter 전송, Shift+Enter 줄바꿈)" : "API 키를 먼저 설정해주세요"}
+                  placeholder={
+                    hasAnyKey
+                      ? "메시지를 입력하세요... (Enter 전송, Shift+Enter 줄바꿈)"
+                      : "API 키를 먼저 설정해주세요"
+                  }
                   disabled={!hasAnyKey}
                   className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-gray-400 max-h-32 disabled:bg-gray-50 disabled:text-gray-400"
                   rows={2}
@@ -336,7 +368,7 @@ export default function AgentChat({
 
       {subTab === "image" && (
         <ImageMode
-          geminiKey={geminiKey}
+          hasGemini={hasGemini}
           agentId={agentId || "master"}
           onNeedGemini={() => setSubTab("chat")}
         />

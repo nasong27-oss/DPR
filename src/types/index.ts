@@ -15,14 +15,9 @@ export interface AgentWithContent {
   refinedPrompt: string;
 }
 
-export type ModelType = "gemini" | "claude";
+export type ModelId = string;
 
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
-}
-
-export interface ApiKeys {
-  claudeKey: string;
-  geminiKey: string;
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { loadAllAgents, ghGetFile, ghPutFileSafe } from "@/lib/github";
+import { getKeysFromCookie } from "@/lib/getKeysFromCookie";
 
 const MASTER_SYSTEM = `당신은 여러 PM 에이전트 프롬프트를 통합하는 마스터 프롬프트 생성기입니다.
 아래 각 에이전트의 프롬프트와 익명 피드백을 분석하여 하나의 통합된 마스터 PM 에이전트 프롬프트를 생성하세요.
@@ -17,22 +18,27 @@ const MASTER_SYSTEM = `당신은 여러 PM 에이전트 프롬프트를 통합�
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session?.user?.email)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { geminiKey, claudeKey } = await req.json();
+  const keys = await getKeysFromCookie(session.user.email);
+  const geminiKey = keys?.geminiKey || "";
+  const claudeKey = keys?.claudeKey || "";
+
   if (!geminiKey && !claudeKey)
     return NextResponse.json({ error: "API key required" }, { status: 400 });
+
+  // Accept optional body (ignored, kept for backward compat)
+  await req.json().catch(() => {});
 
   const author = {
     name: session.user.name || "PM Team",
     email: session.user.email || "pm@team.com",
   };
 
-  // Load all non-excluded agents
   const agents = await loadAllAgents();
 
   if (agents.length === 0) {
-    // Empty master prompt
     await ghPutFileSafe(
       "master/master-prompt.md",
       "# 마스터 에이전트\n\n등록된 에이전트가 없습니다.",
@@ -42,16 +48,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ masterPrompt: "" });
   }
 
-  // Load feedback for each agent
   const agentSections = await Promise.all(
     agents.map(async (agent) => {
       const feedbackFile = await ghGetFile(`registry/${agent.meta.id}/feedback.md`);
       const feedback = feedbackFile?.content || "";
-      return `## ${agent.meta.name} (${agent.meta.description})\n\n### 프롬프트\n${agent.refinedPrompt}${feedback ? `\n\n### 익명 피드백\n${feedback}` : ""}`;
+      return `## ${agent.meta.name} (${agent.meta.description})\n\n### 프롬프트\n${agent.refinedPrompt}${
+        feedback ? `\n\n### 익명 피드백\n${feedback}` : ""
+      }`;
     })
   );
 
-  const userPrompt = `다음 ${agents.length}개 PM 에이전트 프롬프트를 통합하여 마스터 에이전트 프롬프트를 생성하세요.\n\n${agentSections.join("\n\n---\n\n")}`;
+  const userPrompt = `다음 ${agents.length}개 PM 에이전트 프롬프트를 통합하여 마스터 에이전트 프롬프트를 생성하세요.\n\n${agentSections.join(
+    "\n\n---\n\n"
+  )}`;
 
   try {
     let masterPrompt = "";
@@ -60,7 +69,7 @@ export async function POST(req: NextRequest) {
       const { GoogleGenerativeAI } = await import("@google/generative-ai");
       const genAI = new GoogleGenerativeAI(geminiKey);
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash",
         systemInstruction: MASTER_SYSTEM,
       });
       const result = await model.generateContent(userPrompt);
@@ -69,7 +78,7 @@ export async function POST(req: NextRequest) {
       const Anthropic = (await import("@anthropic-ai/sdk")).default;
       const anthropic = new Anthropic({ apiKey: claudeKey });
       const msg = await anthropic.messages.create({
-        model: "claude-opus-4-6",
+        model: "claude-sonnet-4-6",
         max_tokens: 4096,
         system: MASTER_SYSTEM,
         messages: [{ role: "user", content: userPrompt }],
