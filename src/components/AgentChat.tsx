@@ -178,7 +178,8 @@ export default function AgentChat({
 
   const geminiModels = availableModels.filter((m) => m.provider === "gemini");
   const claudeModels = availableModels.filter((m) => m.provider === "claude");
-  const currentModelLabel = availableModels.find((m) => m.id === selectedModel)?.label || selectedModel;
+  const currentModel = availableModels.find((m) => m.id === selectedModel);
+  const currentModelLabel = currentModel?.label || selectedModel;
 
   return (
     <div>
@@ -242,7 +243,7 @@ export default function AgentChat({
       {subTab === "chat" && (
         <div>
           {/* Model selector + save button */}
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
             {availableModels.length > 1 ? (
               <select
                 value={selectedModel}
@@ -285,6 +286,13 @@ export default function AgentChat({
               </button>
             )}
           </div>
+
+          {/* Model description hint */}
+          {currentModel?.description && (
+            <p className="text-xs text-gray-400 mb-3">
+              {currentModel.provider === "gemini" ? "✨" : "🤖"} {currentModel.description}
+            </p>
+          )}
 
           {/* Messages */}
           <div className="flex flex-col h-[calc(100vh-400px)] min-h-[320px]">
