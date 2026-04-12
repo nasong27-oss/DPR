@@ -253,6 +253,9 @@ function RegisterForm() {
               {loading && <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
               {loading ? "프롬프트 정제 중..." : "다음 단계 (프롬프트 정제)"}
             </button>
+            <p className="text-xs text-gray-400 text-center">
+              💡 등록된 내 API 키(Gemini 우선, 없으면 Claude)로 프롬프트를 자동 정제합니다
+            </p>
           </div>
         )}
 

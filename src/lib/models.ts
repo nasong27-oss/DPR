@@ -7,8 +7,7 @@ export interface ModelDef {
 
 export const MODELS: ModelDef[] = [
   { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", cost: "저가", provider: "gemini" },
-  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", cost: "중가", provider: "gemini" },
-  { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro", cost: "고가", provider: "gemini" },
+  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", cost: "고가", provider: "gemini" },
   { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", cost: "저가", provider: "claude" },
   { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", cost: "중가", provider: "claude" },
   { id: "claude-opus-4-6", label: "Claude Opus 4.6", cost: "고가", provider: "claude" },

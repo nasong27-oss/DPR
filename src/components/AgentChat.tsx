@@ -45,6 +45,7 @@ export default function AgentChat({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -277,9 +278,10 @@ export default function AgentChat({
               <button
                 onClick={handleSaveConversation}
                 disabled={saving || saved}
+                title="대화 내용을 GitHub 저장소에 마크다운 파일로 저장합니다"
                 className="px-3 py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700 disabled:opacity-40 transition-colors"
               >
-                {saved ? "저장 완료!" : saving ? "저장 중..." : "이 대화 저장"}
+                {saved ? "저장 완료!" : saving ? "저장 중..." : "GitHub에 저장"}
               </button>
             )}
           </div>
@@ -299,29 +301,43 @@ export default function AgentChat({
               )}
               {messages.map((msg, i) => (
                 <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-[88%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                      msg.role === "user"
-                        ? "bg-gray-900 text-white rounded-br-sm"
-                        : "bg-gray-100 text-gray-800 rounded-bl-sm"
-                    }`}
-                  >
-                    {msg.role === "assistant" && msg.content === "" ? (
-                      <div className="flex gap-1">
-                        <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                        <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                        <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
-                      </div>
-                    ) : (
-                      <pre
-                        className={`whitespace-pre-wrap font-sans ${
-                          loading && i === messages.length - 1 && msg.role === "assistant"
-                            ? "streaming-cursor"
-                            : ""
-                        }`}
+                  <div className={`max-w-[88%] group relative ${msg.role === "assistant" ? "flex flex-col items-start" : ""}`}>
+                    <div
+                      className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                        msg.role === "user"
+                          ? "bg-gray-900 text-white rounded-br-sm"
+                          : "bg-gray-100 text-gray-800 rounded-bl-sm"
+                      }`}
+                    >
+                      {msg.role === "assistant" && msg.content === "" ? (
+                        <div className="flex gap-1">
+                          <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
+                          <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
+                          <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
+                        </div>
+                      ) : (
+                        <pre
+                          className={`whitespace-pre-wrap font-sans ${
+                            loading && i === messages.length - 1 && msg.role === "assistant"
+                              ? "streaming-cursor"
+                              : ""
+                          }`}
+                        >
+                          {msg.content}
+                        </pre>
+                      )}
+                    </div>
+                    {msg.role === "assistant" && msg.content !== "" && (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(msg.content);
+                          setCopiedIdx(i);
+                          setTimeout(() => setCopiedIdx(null), 2000);
+                        }}
+                        className="mt-1 px-2 py-0.5 text-xs text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity rounded"
                       >
-                        {msg.content}
-                      </pre>
+                        {copiedIdx === i ? "복사됨" : "복사"}
+                      </button>
                     )}
                   </div>
                 </div>

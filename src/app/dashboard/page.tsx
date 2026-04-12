@@ -269,44 +269,54 @@ export default function Dashboard() {
                 <p className="text-sm text-gray-500">에이전트 로딩 중...</p>
               </div>
             </div>
-          ) : activeTab === "master" ? (
-            <AgentChat
-              key="master"
-              agentName="★ 마스터 에이전트"
-              agentDescription={`${agents.length}개 에이전트 통합 · 전체 PM 역량을 하나로`}
-              systemPrompt={masterPrompt}
-              hasClaude={hasClaude}
-              hasGemini={hasGemini}
-              selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
-            />
-          ) : activeAgent ? (
-            <AgentChat
-              key={activeAgent.meta.id}
-              agentId={activeAgent.meta.id}
-              agentName={activeAgent.meta.name}
-              agentDescription={activeAgent.meta.description}
-              agentOwner={activeAgent.meta.owner}
-              systemPrompt={activeAgent.refinedPrompt}
-              hasClaude={hasClaude}
-              hasGemini={hasGemini}
-              selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
-              isOwner={activeAgent.meta.email === userEmail}
-              onEdit={() => router.push(`/register?id=${activeAgent.meta.id}`)}
-              onDelete={() => setDeleteTarget(activeAgent.meta)}
-            />
           ) : (
-            <div className="text-center py-16 text-gray-400">
-              <p className="text-4xl mb-3">🤖</p>
-              <p>에이전트를 선택하거나 새로 등록하세요</p>
-              <Link
-                href="/register"
-                className="inline-block mt-4 px-5 py-2.5 bg-slate-900 text-white text-sm rounded-xl hover:bg-slate-800"
-              >
-                + 첫 에이전트 등록하기
-              </Link>
-            </div>
+            <>
+              {/* Master — always mounted to preserve conversation state */}
+              <div className={activeTab === "master" ? "" : "hidden"}>
+                <AgentChat
+                  agentName="★ 마스터 에이전트"
+                  agentDescription={`${agents.length}개 에이전트 통합 · 전체 PM 역량을 하나로`}
+                  systemPrompt={masterPrompt}
+                  hasClaude={hasClaude}
+                  hasGemini={hasGemini}
+                  selectedModel={selectedModel}
+                  onModelChange={setSelectedModel}
+                />
+              </div>
+
+              {/* Individual agents — all mounted, CSS show/hide */}
+              {agents.map((agent) => (
+                <div key={agent.meta.id} className={activeTab === agent.meta.id ? "" : "hidden"}>
+                  <AgentChat
+                    agentId={agent.meta.id}
+                    agentName={agent.meta.name}
+                    agentDescription={agent.meta.description}
+                    agentOwner={agent.meta.owner}
+                    systemPrompt={agent.refinedPrompt}
+                    hasClaude={hasClaude}
+                    hasGemini={hasGemini}
+                    selectedModel={selectedModel}
+                    onModelChange={setSelectedModel}
+                    isOwner={agent.meta.email === userEmail}
+                    onEdit={() => router.push(`/register?id=${agent.meta.id}`)}
+                    onDelete={() => setDeleteTarget(agent.meta)}
+                  />
+                </div>
+              ))}
+
+              {agents.length === 0 && activeTab !== "master" && (
+                <div className="text-center py-16 text-gray-400">
+                  <p className="text-4xl mb-3">🤖</p>
+                  <p>에이전트를 선택하거나 새로 등록하세요</p>
+                  <Link
+                    href="/register"
+                    className="inline-block mt-4 px-5 py-2.5 bg-slate-900 text-white text-sm rounded-xl hover:bg-slate-800"
+                  >
+                    + 첫 에이전트 등록하기
+                  </Link>
+                </div>
+              )}
+            </>
           )}
         </div>
       </main>
