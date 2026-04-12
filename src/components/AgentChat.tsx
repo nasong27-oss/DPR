@@ -243,18 +243,18 @@ export default function AgentChat({
       {subTab === "chat" && (
         <div>
           {/* Model selector + save button */}
-          <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             {availableModels.length > 1 ? (
               <select
                 value={selectedModel}
                 onChange={(e) => onModelChange(e.target.value)}
-                className="text-sm border border-gray-300 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-400 bg-white"
+                className="text-sm border border-gray-300 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-400 bg-white max-w-xs"
               >
                 {geminiModels.length > 0 && (
-                  <optgroup label="✨ Gemini (웹 검색 포함)">
+                  <optgroup label="✨ Gemini (웹 검색)">
                     {geminiModels.map((m) => (
                       <option key={m.id} value={m.id}>
-                        {m.label} ({m.cost})
+                        {m.label} — {m.description}
                       </option>
                     ))}
                   </optgroup>
@@ -263,7 +263,7 @@ export default function AgentChat({
                   <optgroup label="🤖 Claude">
                     {claudeModels.map((m) => (
                       <option key={m.id} value={m.id}>
-                        {m.label} ({m.cost})
+                        {m.label} — {m.description}
                       </option>
                     ))}
                   </optgroup>
@@ -286,13 +286,6 @@ export default function AgentChat({
               </button>
             )}
           </div>
-
-          {/* Model description hint */}
-          {currentModel?.description && (
-            <p className="text-xs text-gray-400 mb-3">
-              {currentModel.provider === "gemini" ? "✨" : "🤖"} {currentModel.description}
-            </p>
-          )}
 
           {/* Messages */}
           <div className="flex flex-col h-[calc(100vh-400px)] min-h-[320px]">

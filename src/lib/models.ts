@@ -7,43 +7,7 @@ export interface ModelDef {
 }
 
 export const MODELS: ModelDef[] = [
-  // ── Gemini 3.1 시리즈 (최신 프리뷰) ─────────────────────────────
-  {
-    id: "gemini-3.1-ultra",
-    label: "Gemini 3.1 Ultra",
-    cost: "고가",
-    provider: "gemini",
-    description: "대규모 복잡한 프로젝트를 위한 하이엔드 모델",
-  },
-  {
-    id: "gemini-3.1-pro-preview",
-    label: "Gemini 3.1 Pro",
-    cost: "고가",
-    provider: "gemini",
-    description: "최고 수준의 복합 추론 및 코딩 능력 (94.3% GPQA)",
-  },
-  {
-    id: "gemini-3.1-flash-preview",
-    label: "Gemini 3.1 Flash",
-    cost: "중가",
-    provider: "gemini",
-    description: "실시간 반응 속도와 높은 처리량에 최적화",
-  },
-  {
-    id: "gemini-3.1-flash-lite-preview",
-    label: "Gemini 3.1 Flash-Lite",
-    cost: "저가",
-    provider: "gemini",
-    description: "극도의 비용 효율성 및 초저지연 (가장 저렴)",
-  },
   // ── Gemini 2.5 시리즈 (안정화) ──────────────────────────────────
-  {
-    id: "gemini-2.5-pro",
-    label: "Gemini 2.5 Pro",
-    cost: "고가",
-    provider: "gemini",
-    description: "긴 컨텍스트 창(1M+ 토큰) 지원, 안정적인 성능",
-  },
   {
     id: "gemini-2.5-flash",
     label: "Gemini 2.5 Flash",
@@ -52,11 +16,25 @@ export const MODELS: ModelDef[] = [
     description: "범용 고속 작업용 표준 모델",
   },
   {
+    id: "gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
+    cost: "고가",
+    provider: "gemini",
+    description: "긴 컨텍스트 창(1M+ 토큰) 지원, 안정적인 성능",
+  },
+  {
     id: "gemini-2.5-flash-lite",
     label: "Gemini 2.5 Flash-Lite",
     cost: "저가",
     provider: "gemini",
-    description: "경량화된 처리용",
+    description: "경량화된 처리용 (가장 저렴)",
+  },
+  {
+    id: "gemini-2.0-flash",
+    label: "Gemini 2.0 Flash",
+    cost: "저가",
+    provider: "gemini",
+    description: "안정적인 범용 모델",
   },
   // ── Claude ───────────────────────────────────────────────────────
   {
@@ -91,7 +69,7 @@ export function getAvailableModels(hasClaude: boolean, hasGemini: boolean): Mode
 }
 
 export function getDefaultModelId(hasClaude: boolean, hasGemini: boolean): string {
-  if (hasGemini) return "gemini-3.1-flash-preview";
+  if (hasGemini) return "gemini-2.5-flash";
   if (hasClaude) return "claude-sonnet-4-6";
   return "";
 }
