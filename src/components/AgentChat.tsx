@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useSession } from "next-auth/react";
 import { ModelId, ChatMessage } from "@/types";
 import { getAvailableModels, getDefaultModelId } from "@/lib/models";
 import ImageMode from "./ImageMode";
@@ -38,13 +37,10 @@ export default function AgentChat({
   onEdit,
   onDelete,
 }: Props) {
-  const { data: session } = useSession();
   const [subTab, setSubTab] = useState<SubTab>("chat");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -123,6 +119,15 @@ export default function AgentChat({
           }
         }
       }
+
+      // 완료된 Q&A를 익명으로 자동 저장 (fire & forget)
+      if (fullText) {
+        fetch("/api/github/context", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentId: agentId || "master", question: text, answer: fullText }),
+        }).catch(() => {});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "오류가 발생했습니다.");
       setMessages((prev) => prev.slice(0, -1));
@@ -138,43 +143,6 @@ export default function AgentChat({
     }
   };
 
-  const handleSaveConversation = async () => {
-    if (!messages.length) return;
-    setSaving(true);
-
-    const today = new Date().toISOString().split("T")[0];
-    const firstQ = messages.find((m) => m.role === "user")?.content || "대화";
-    const topic = firstQ
-      .slice(0, 40)
-      .replace(/[^가-힣a-zA-Z0-9\s]/g, "")
-      .trim()
-      .replace(/\s+/g, "-");
-    const path = `outputs/QA-${agentName}-${today}-${topic}.md`;
-    const content = [
-      `# QA 대화 — ${agentName} (${today})`,
-      `작성자: ${session?.user?.name}`,
-      "",
-      "---",
-      "",
-      ...messages.map((m) => `### ${m.role === "user" ? "Q" : "A"}\n\n${m.content}`),
-    ].join("\n\n");
-
-    const res = await fetch("/api/github/commit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        path,
-        content,
-        message: `docs: QA 대화 저장 [${agentName}] (by ${session?.user?.name})`,
-      }),
-    });
-
-    if (res.ok) {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 4000);
-    }
-    setSaving(false);
-  };
 
   const geminiModels = availableModels.filter((m) => m.provider === "gemini");
   const claudeModels = availableModels.filter((m) => m.provider === "claude");
@@ -242,8 +210,8 @@ export default function AgentChat({
 
       {subTab === "chat" && (
         <div>
-          {/* Model selector + save button */}
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          {/* Model selector */}
+          <div className="flex items-center mb-3">
             {availableModels.length > 1 ? (
               <select
                 value={selectedModel}
@@ -273,17 +241,6 @@ export default function AgentChat({
               <span className="text-xs text-gray-500">
                 {hasGemini ? `✨ ${currentModelLabel} · 웹 검색` : `🤖 ${currentModelLabel}`}
               </span>
-            )}
-
-            {messages.length > 0 && (
-              <button
-                onClick={handleSaveConversation}
-                disabled={saving || saved}
-                title="대화 내용을 GitHub 저장소에 마크다운 파일로 저장합니다"
-                className="px-3 py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700 disabled:opacity-40 transition-colors"
-              >
-                {saved ? "저장 완료!" : saving ? "저장 중..." : "GitHub에 저장"}
-              </button>
             )}
           </div>
 
@@ -377,6 +334,11 @@ export default function AgentChat({
               </div>
             </div>
           </div>
+
+          {/* Anonymous learning notice */}
+          <p className="mt-2 text-xs text-gray-400 text-center">
+            대화 내용은 익명으로 팀 학습에 자동 활용됩니다
+          </p>
 
           {/* Feedback (not for master) */}
           {agentId && <FeedbackSection agentId={agentId} />}

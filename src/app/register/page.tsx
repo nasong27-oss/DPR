@@ -272,10 +272,15 @@ function RegisterForm() {
                 </button>
               </div>
 
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4">
-                <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono leading-relaxed">
-                  {refined}
-                </pre>
+              <div className="mb-4">
+                <label className="block text-xs text-gray-400 mb-1.5">
+                  직접 수정할 수 있습니다
+                </label>
+                <textarea
+                  value={refined}
+                  onChange={(e) => setRefined(e.target.value)}
+                  className="w-full h-80 px-4 py-3 border border-gray-300 rounded-xl text-sm font-mono leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
               </div>
 
               <div className="flex gap-2 text-sm text-gray-600 border-t border-gray-100 pt-4">

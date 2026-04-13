@@ -149,8 +149,9 @@ export default function PlanPage() {
               <p className="pl-4">├─ {"{agentId}"}/<span className="text-blue-600">prompt.md</span>       <span className="text-gray-400"># 원본 프롬프트 (작성자 원문 보존)</span></p>
               <p className="pl-4">├─ {"{agentId}"}/<span className="text-blue-600">refined.md</span>      <span className="text-gray-400"># AI가 정제한 실행 프롬프트</span></p>
               <p className="pl-4">└─ {"{agentId}"}/<span className="text-green-600">feedback.md</span>    <span className="text-gray-400"># 익명 피드백 누적 (작성자 미저장)</span></p>
+              <p className="mt-2">context/                            <span className="text-gray-400"># 대화 맥락 자동 저장 (집단 학습)</span></p>
+              <p className="pl-4">└─ {"{agentId}"}/learn-{"{date}"}-{"{hash}"}.md  <span className="text-gray-400"># 익명 Q&A 쌍, 자동 누적</span></p>
               <p className="mt-2">master/<span className="text-purple-600">master-prompt.md</span>         <span className="text-gray-400"># 통합 마스터 에이전트 프롬프트</span></p>
-              <p>outputs/                            <span className="text-gray-400"># 팀이 저장한 대화 기록</span></p>
             </div>
             <p className="mt-4 text-xs text-gray-400 leading-relaxed">
               * feedback.md는 익명으로만 기록되어 누가 남겼는지 식별할 수 없습니다.<br />
