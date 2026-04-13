@@ -23,8 +23,8 @@ export const MODELS: ModelDef[] = [
     description: "최고 수준의 복합 추론 및 코딩 능력 (94.3% GPQA)",
   },
   {
-    id: "gemini-3.1-flash-preview",
-    label: "Gemini 3.1 Flash",
+    id: "gemini-3-flash-preview",
+    label: "Gemini 3 Flash",
     cost: "중가",
     provider: "gemini",
     description: "실시간 반응 속도와 높은 처리량에 최적화",
