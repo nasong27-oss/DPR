@@ -1,144 +1,12 @@
-import { ghGetFile } from "@/lib/github";
+"use client";
+
 import PlanPrintButton from "./PlanPrintButton";
 
-export const dynamic = "force-dynamic";
-
-// ── Data types ──────────────────────────────────────────────────
-interface PlanData {
-  subtitle: string;
-  overview: string;
-  philosophy: { title: string; desc: string }[];
-  layerDiagram: string;
-  features: { icon: string; title: string; desc: string }[];
-  dataStructure: string;
-  dataNotes: string[];
-  techStack: { label: string; items: string[] }[];
-  roadmap: { phase: string; color: "blue" | "purple" | "green"; items: string[] }[];
-  security: { key: string; value: string }[];
-  teamAccess: string;
-  checklist: string[];
-}
-
-// ── Parser ──────────────────────────────────────────────────────
-function parsePlan(md: string): PlanData {
-  // First blockquote line → subtitle / tagline
-  const subtitleMatch = md.match(/^> (.+)/m);
-  const subtitle = subtitleMatch?.[1]?.replace(/\s+$/, "").replace(/\s*\(.+\)$/, "").trim() ?? "";
-
-  // Extract a named section's raw text
-  const lines = md.split("\n");
-  function extractSection(heading: string): string {
-    const startIdx = lines.findIndex((l) => l.startsWith("## ") && l.includes(heading));
-    if (startIdx === -1) return "";
-    const endIdx = lines.findIndex((l, i) => i > startIdx && l.startsWith("## "));
-    return lines.slice(startIdx + 1, endIdx === -1 ? undefined : endIdx).join("\n");
-  }
-
-  // ── Overview
-  const overview = extractSection("프로젝트 개요")
-    .replace(/^---\s*$/gm, "")
-    .trim()
-    .replace(/\n+/g, " ")
-    .replace(/  +/g, " ");
-
-  // ── Philosophy cards  (### N. Title\n content\n)
-  const philRaw = extractSection("플랫폼 사상");
-  const philosophy: PlanData["philosophy"] = [];
-  const philParts = philRaw.split(/^### \d+\. /m).slice(1);
-  for (const part of philParts) {
-    const nlIdx = part.indexOf("\n");
-    const title = nlIdx === -1 ? part.trim() : part.slice(0, nlIdx).trim();
-    const desc = nlIdx === -1 ? "" : part.slice(nlIdx + 1).replace(/\n/g, " ").trim();
-    philosophy.push({ title, desc });
-  }
-
-  // ── Layer diagram (first ``` block)
-  const layerRaw = extractSection("동작 구조");
-  const codeBlock = layerRaw.match(/```([\s\S]*?)```/);
-  const layerDiagram = codeBlock
-    ? codeBlock[1].replace(/^\w*\n/, "").trimEnd()
-    : "";
-
-  // ── Features table  (| title | desc |)
-  const featRaw = extractSection("핵심 기능");
-  const featureIcons: Record<string, string> = {
-    "에이전트 등록": "📝",
-    "마스터 에이전트": "★",
-    "스트리밍": "💬",
-    "웹 검색": "🔍",
-    "익명": "💌",
-    "이미지": "🖼️",
-  };
-  const features: PlanData["features"] = [];
-  for (const row of featRaw.split("\n")) {
-    const cols = row.split("|").map((c) => c.trim()).filter(Boolean);
-    if (cols.length < 2 || cols[0] === "기능" || /^-+$/.test(cols[0])) continue;
-    const iconKey = Object.keys(featureIcons).find((k) => cols[0].includes(k));
-    features.push({ icon: iconKey ? featureIcons[iconKey] : "•", title: cols[0], desc: cols[1] });
-  }
-
-  // ── Data structure (first ``` block + bullet notes)
-  const dataRaw = extractSection("데이터 구조");
-  const dataCode = dataRaw.match(/```([\s\S]*?)```/);
-  const dataStructure = dataCode ? dataCode[1].replace(/^\w*\n/, "").trimEnd() : "";
-  const dataNotes = (dataRaw.match(/^- (.+)$/gm) ?? []).map((l) => l.slice(2));
-
-  // ── Tech stack table
-  const techRaw = extractSection("기술 스택");
-  const techStack: PlanData["techStack"] = [];
-  for (const row of techRaw.split("\n")) {
-    const cols = row.split("|").map((c) => c.trim()).filter(Boolean);
-    if (cols.length < 2 || cols[0] === "영역" || /^-+$/.test(cols[0])) continue;
-    techStack.push({ label: cols[0], items: cols[1].split(/[,，]/).map((s) => s.trim()) });
-  }
-
-  // ── Roadmap  (**단기/중기/장기**\n- item1 / item2)
-  const roadRaw = extractSection("로드맵");
-  const phaseColors: Record<string, "blue" | "purple" | "green"> = {
-    단기: "blue", 중기: "purple", 장기: "green",
-  };
-  const roadmap: PlanData["roadmap"] = [];
-  let rmMatch: RegExpExecArray | null;
-  const rmRegex = /\*\*([^*]+)\*\*\n- (.+)/g;
-  while ((rmMatch = rmRegex.exec(roadRaw)) !== null) {
-    const phase = rmMatch[1].trim();
-    const items = rmMatch[2].split(/\s*\/\s*/).map((s: string) => s.trim()).filter(Boolean);
-    roadmap.push({ phase, color: phaseColors[phase] ?? "blue", items });
-  }
-
-  // ── Appendix
-  const appRaw = extractSection("부가 사항");
-  const security: PlanData["security"] = [];
-  for (const row of appRaw.split("\n")) {
-    const cols = row.split("|").map((c) => c.trim()).filter(Boolean);
-    if (cols.length < 2 || cols[0] === "항목" || /^-+$/.test(cols[0])) continue;
-    security.push({ key: cols[0], value: cols[1] });
-  }
-  const teamMatch = appRaw.match(/### 팀 접근 제어\n([\s\S]+?)(?=\n###|$)/);
-  const teamAccess = teamMatch?.[1]?.trim() ?? "";
-  const checkMatch = appRaw.match(/### 개발 완료 항목\n([\s\S]+?)(?=\n###|$)/);
-  const checklist = checkMatch
-    ? (checkMatch[1].match(/^- (.+)$/gm) ?? []).map((l) => l.slice(2).trim())
-    : [];
-
-  return { subtitle, overview, philosophy, layerDiagram, features, dataStructure, dataNotes, techStack, roadmap, security, teamAccess, checklist };
-}
-
-// ── Page ────────────────────────────────────────────────────────
-export default async function PlanPage() {
-  const file = await ghGetFile("PLAN.md");
-  if (!file) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">
-        PLAN.md를 불러올 수 없습니다.
-      </div>
-    );
-  }
-  const plan = parsePlan(file.content);
-
+export default function PlanPage() {
   return (
     <>
       <PlanPrintButton />
+
       <div className="min-h-screen bg-white text-gray-900 font-sans">
         <div className="max-w-4xl mx-auto px-8 py-16 print:py-8 print:px-12">
 
@@ -149,70 +17,111 @@ export default async function PlanPage() {
               <span className="text-sm text-gray-400 font-medium tracking-widest uppercase">PM Agent Hub</span>
             </div>
             <h1 className="text-5xl font-bold text-gray-900 leading-tight mb-6">
-              {plan.subtitle || "PM 에이전트 허브"}
+              흩어져 있는 경험과<br />
+              <span className="text-slate-400">프롬프트를 공동의 자산으로</span>
             </h1>
-            {plan.overview && (
-              <p className="text-lg text-gray-500 leading-relaxed max-w-2xl">
-                {plan.overview}
-              </p>
-            )}
+            <p className="text-lg text-gray-500 leading-relaxed max-w-2xl">
+              참여자 누구나 자신이 만든 AI 에이전트 프롬프트를 등록하면,
+              개별 실행 또는 전체 통합 마스터 에이전트로 실행할 수 있는 에이전트 허브.
+              모든 에이전트와 프롬프트는 GitHub에 저장되며 버전 관리된다.
+            </p>
             <div className="mt-10 pt-8 border-t border-gray-100 text-sm text-gray-400">
               2026년 4월 · dpr-agent-hub
             </div>
           </div>
 
           {/* 01. 플랫폼 사상 */}
-          {plan.philosophy.length > 0 && (
-            <Section number="01" title="플랫폼 사상">
-              <div className="space-y-5">
-                {plan.philosophy.map((p, i) => (
-                  <PhilosophyCard key={i} index={String(i + 1)} title={p.title} desc={p.desc} />
-                ))}
-              </div>
-            </Section>
-          )}
+          <Section number="01" title="플랫폼 사상">
+            <div className="space-y-5">
+              <PhilosophyCard
+                index="1"
+                title="통합되어 협업하는 에이전트"
+                desc="각각의 에이전트는 독립적으로 실행되는 동시에, 마스터 에이전트 안에서 통합되어 작동한다. 팀원 A의 리서치 에이전트와 팀원 B의 경쟁사 분석 에이전트는 각자의 역할로도, 하나의 통합 지성으로도 활용된다."
+              />
+              <PhilosophyCard
+                index="2"
+                title="개인의 맥락이 아닌 공동의 맥락"
+                desc="대화의 맥락은 학습되지만, 개인의 맥락은 저장되지 않는다. 이 플랫폼을 사용하는 모든 구성원이 공유하는 공동의 맥락만이 축적된다. GitHub에 저장되는 학습 결과 역시 익명화되어 공동의 맥락으로만 반영된다."
+              />
+              <PhilosophyCard
+                index="3"
+                title="누구나 활용할 수 있게 공유되는 자산"
+                desc="모든 학습의 내용은 GitHub에 저장되어, 특정 소유자에게 종속되지 않는다. 누군가 떠나더라도, 그가 기여한 경험과 맥락은 전체의 자산으로 남는다. 지식은 사람이 아닌 참여자들에게 귀속된다."
+              />
+              <PhilosophyCard
+                index="4"
+                title="에이전트의 지속적 성장"
+                desc="등록된 각각의 에이전트는 플랫폼에 쌓인 학습 결과를 바탕으로 동작한다. 참여자들이 더 많이 사용할수록, 에이전트는 맥락과 언어를 더 깊이 이해하며 정교해진다."
+              />
+            </div>
+          </Section>
 
           {/* 02. 동작 구조 */}
           <Section number="02" title="동작 구조">
             <p className="text-gray-500 leading-relaxed mb-8">
               에이전트 등록에서 실행까지, 플랫폼은 세 가지 레이어로 동작한다.
             </p>
-            {plan.layerDiagram ? (
-              <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 font-mono text-sm text-gray-700 leading-loose whitespace-pre overflow-x-auto">
-                {plan.layerDiagram}
+            <div className="space-y-3">
+              <LayerBox
+                label="실행 레이어"
+                color="bg-slate-900 text-white"
+                content="마스터 에이전트 (Master Agent)"
+                desc="등록된 모든 에이전트를 통합하여 팀 전체의 역량을 하나로 실행"
+              />
+              <div className="flex justify-center text-gray-300 text-xl">↕</div>
+              <div className="grid grid-cols-3 gap-3">
+                {["리서치 에이전트", "경쟁사 분석 에이전트", "마케팅 전략 에이전트"].map((name) => (
+                  <div key={name} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center">
+                    <p className="text-xs font-medium text-slate-700">{name}</p>
+                    <p className="text-xs text-slate-400 mt-1">독립 실행 가능</p>
+                  </div>
+                ))}
               </div>
-            ) : (
-              <div className="space-y-3">
-                <LayerBox label="실행 레이어" color="bg-slate-900 text-white"
-                  content="마스터 에이전트 (Master Agent)"
-                  desc="등록된 모든 에이전트를 통합하여 팀 전체의 역량을 하나로 실행" />
-                <div className="flex justify-center text-gray-300 text-xl">↕</div>
-                <div className="grid grid-cols-3 gap-3">
-                  {["리서치 에이전트", "경쟁사 분석 에이전트", "마케팅 전략 에이전트"].map((n) => (
-                    <div key={n} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center">
-                      <p className="text-xs font-medium text-slate-700">{n}</p>
-                      <p className="text-xs text-slate-400 mt-1">독립 실행 가능</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex justify-center text-gray-300 text-xl">↕</div>
-                <LayerBox label="학습 레이어" color="bg-gray-100 text-gray-700"
-                  content="GitHub 공동 맥락 저장소"
-                  desc="익명화된 피드백 · 정제된 프롬프트 · 대화 기록 → 집단 지성" />
-              </div>
-            )}
+              <div className="flex justify-center text-gray-300 text-xl">↕</div>
+              <LayerBox
+                label="학습 레이어"
+                color="bg-gray-100 text-gray-700"
+                content="GitHub 공동 맥락 저장소"
+                desc="익명화된 피드백 · 정제된 프롬프트 · 대화 기록 → 모든 에이전트가 공유하는 집단 지성"
+              />
+            </div>
           </Section>
 
           {/* 03. 핵심 기능 */}
-          {plan.features.length > 0 && (
-            <Section number="03" title="핵심 기능">
-              <div className="space-y-4">
-                {plan.features.map((f, i) => (
-                  <FeatureRow key={i} icon={f.icon} title={f.title} desc={f.desc} />
-                ))}
-              </div>
-            </Section>
-          )}
+          <Section number="03" title="핵심 기능">
+            <div className="space-y-4">
+              <FeatureRow
+                icon="📝"
+                title="에이전트 등록 & 정제"
+                desc="날것의 프롬프트를 등록하면 AI가 역할 명확화·중복 제거·출력 형식 표준화를 자동 수행한다. 원본 프롬프트와 정제본이 모두 GitHub에 버전 관리된다."
+              />
+              <FeatureRow
+                icon="★"
+                title="마스터 에이전트 자동 통합"
+                desc="새 에이전트가 등록되거나 수정될 때마다 마스터 에이전트가 자동 재생성된다. 팀의 집단 지성은 항상 최신 상태를 유지한다."
+              />
+              <FeatureRow
+                icon="💬"
+                title="실시간 스트리밍 채팅"
+                desc="에이전트별로, 또는 마스터 에이전트로 대화한다. Gemini · Claude 중 목적에 맞는 모델을 선택할 수 있다."
+              />
+              <FeatureRow
+                icon="🔍"
+                title="웹 검색 그라운딩 (Gemini)"
+                desc="Gemini 모델은 Google Search를 통해 실시간 정보를 검색하고 답변에 반영한다. 최신 시장 동향, 경쟁사 뉴스, 업계 리포트를 실시간으로 활용할 수 있다."
+              />
+              <FeatureRow
+                icon="💌"
+                title="익명 피드백 & 집단 학습"
+                desc="에이전트에 남긴 피드백은 작성자 정보 없이 공동 학습 데이터로 저장된다. 다음 프롬프트 정제 시 자동으로 반영되어 에이전트가 지속적으로 개선된다."
+              />
+              <FeatureRow
+                icon="🖼️"
+                title="이미지 생성 & 편집"
+                desc="마케팅 소재, 화면 목업, 개념 시각화 이미지를 Gemini Vision으로 생성하고 편집한다."
+              />
+            </div>
+          </Section>
 
           {/* 04. 데이터 구조 */}
           <Section number="04" title="데이터 구조 (GitHub 저장소)">
@@ -220,91 +129,122 @@ export default async function PlanPage() {
               모든 데이터는 GitHub에 저장된다. 특정 플랫폼이나 소유자에 종속되지 않으며,
               팀이 도구를 바꾸더라도 축적된 에이전트 자산은 영구히 보존된다.
             </p>
-            {plan.dataStructure ? (
-              <div className="bg-gray-50 rounded-2xl p-6 font-mono text-sm text-gray-700 leading-loose whitespace-pre overflow-x-auto">
-                {plan.dataStructure}
-              </div>
-            ) : (
-              <div className="bg-gray-50 rounded-2xl p-6 font-mono text-sm text-gray-700 leading-loose">
-                <p>registry/</p>
-                <p className="pl-4">└─ {"{agentId}/"}<span className="text-blue-600">meta.json / prompt.md / refined.md / feedback.md</span></p>
-                <p className="mt-2">master/<span className="text-purple-600">master-prompt.md</span></p>
-                <p>context/<span className="text-green-600">{"{agentId}"}/learn-{"{date}"}-{"{hash}"}.md</span></p>
-              </div>
-            )}
-            {plan.dataNotes.length > 0 && (
-              <ul className="mt-4 space-y-1">
-                {plan.dataNotes.map((n, i) => (
-                  <li key={i} className="text-xs text-gray-400 flex gap-1.5">
-                    <span>*</span><span>{n}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <div className="bg-gray-50 rounded-2xl p-6 font-mono text-sm text-gray-700 leading-loose">
+              <p>registry/</p>
+              <p className="pl-4">├─ {"{agentId}"}/<span className="text-blue-600">meta.json</span>       <span className="text-gray-400"># 이름·소유자·버전 메타데이터</span></p>
+              <p className="pl-4">├─ {"{agentId}"}/<span className="text-blue-600">prompt.md</span>       <span className="text-gray-400"># 원본 프롬프트 (작성자 원문 보존)</span></p>
+              <p className="pl-4">├─ {"{agentId}"}/<span className="text-blue-600">refined.md</span>      <span className="text-gray-400"># AI가 정제한 실행 프롬프트</span></p>
+              <p className="pl-4">└─ {"{agentId}"}/<span className="text-green-600">feedback.md</span>    <span className="text-gray-400"># 익명 피드백 누적 (작성자 미저장)</span></p>
+              <p className="mt-2">master/<span className="text-purple-600">master-prompt.md</span>         <span className="text-gray-400"># 통합 마스터 에이전트 프롬프트</span></p>
+              <p>outputs/                            <span className="text-gray-400"># 팀이 저장한 대화 기록</span></p>
+              <p className="mt-2">context/                            <span className="text-gray-400"># 대화 맥락 자동 저장 (집단 학습)</span></p>
+              <p className="pl-4">└─ {"{agentId}"}/learn-{"{date}"}-{"{hash}"}.md  <span className="text-gray-400"># 익명 Q&A 쌍, 자동 누적</span></p>
+            </div>
+            <p className="mt-4 text-xs text-gray-400 leading-relaxed">
+              * feedback.md는 익명으로만 기록되어 누가 남겼는지 식별할 수 없습니다.<br />
+              * 에이전트 삭제 시 해당 폴더 전체가 제거되지만, Git 히스토리로 언제든 복원 가능합니다.
+            </p>
           </Section>
 
           {/* 05. 기술 스택 */}
-          {plan.techStack.length > 0 && (
-            <Section number="05" title="기술 스택">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {plan.techStack.map(({ label, items }) => (
-                  <div key={label} className="p-4 border border-gray-100 rounded-xl">
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{label}</p>
-                    {items.map((item) => (
-                      <p key={item} className="text-sm text-gray-700 py-0.5">{item}</p>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
+          <Section number="05" title="기술 스택">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[
+                { label: "프레임워크", items: ["Next.js 14", "React 18", "TypeScript 5.8"] },
+                { label: "AI 모델", items: ["Gemini 2.5 / 3.1", "Claude Haiku / Sonnet / Opus", "Gemini Vision"] },
+                { label: "인프라", items: ["GitHub API", "Google OAuth", "Vercel"] },
+                { label: "UI", items: ["Tailwind CSS 3", "SSE 스트리밍", "반응형"] },
+              ].map(({ label, items }) => (
+                <div key={label} className="p-4 border border-gray-100 rounded-xl">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{label}</p>
+                  {items.map((item) => (
+                    <p key={item} className="text-sm text-gray-700 py-0.5">{item}</p>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </Section>
 
           {/* 06. 향후 로드맵 */}
-          {plan.roadmap.length > 0 && (
-            <Section number="06" title="향후 로드맵">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                {plan.roadmap.map((r) => (
-                  <RoadmapCard key={r.phase} phase={r.phase} color={r.color} items={r.items} />
-                ))}
-              </div>
-            </Section>
-          )}
+          <Section number="06" title="향후 로드맵">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <RoadmapCard phase="단기" color="blue" items={[
+                "모델 동작 안정화",
+                "대화 기록 내보내기",
+                "주기적인 Garbage 데이터 정비",
+                "이미지 제작 정교화",
+              ]} />
+              <RoadmapCard phase="중기" color="purple" items={[
+                "팀원 권한 관리",
+                "에이전트 버전 비교 & 롤백",
+                "외부 Tool 연동",
+                "공개 템플릿 공유",
+              ]} />
+              <RoadmapCard phase="장기" color="green" items={[
+                "멀티팀 지원",
+                "에이전트 워크플로우",
+                "음성 입력",
+                "사내 데이터 RAG 연동",
+              ]} />
+            </div>
+          </Section>
 
           {/* Appendix */}
           <div className="mt-16 pt-10 border-t-2 border-gray-100 print:break-before-page">
             <p className="text-xs font-bold text-gray-300 uppercase tracking-widest mb-8">부가 사항</p>
 
-            {plan.security.length > 0 && (
-              <AppendixSection title="보안 · API 키 관리">
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  {plan.security.map(({ key, value }) => (
-                    <div key={key} className="flex gap-2">
-                      <span className="text-gray-400 min-w-[80px] flex-shrink-0">{key}</span>
-                      <span className="text-gray-600">{value}</span>
-                    </div>
-                  ))}
-                </div>
-              </AppendixSection>
-            )}
+            <AppendixSection title="보안 · API 키 관리">
+              <p className="text-sm text-gray-500 leading-relaxed mb-4">
+                API 키(Gemini / Claude)는 사용자 기기나 서버에 평문으로 저장되지 않습니다.
+                동일 Google 계정으로 로그인하면 어떤 기기에서도 키가 자동 복원됩니다.
+              </p>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                {[
+                  ["암호화 방식", "AES-256-GCM"],
+                  ["키 유도", "HKDF-SHA256 (NEXTAUTH_SECRET + email)"],
+                  ["영구 저장", "GitHub 암호화 파일 (registry/.keys/)"],
+                  ["세션 캐시", "HTTP-only 쿠키 (브라우저)"],
+                  ["크로스 디바이스", "동일 Google 계정 → 자동 복원"],
+                  ["로그아웃 시", "GitHub 파일 삭제 + 쿠키 만료"],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex gap-2">
+                    <span className="text-gray-400 min-w-[80px] flex-shrink-0">{k}</span>
+                    <span className="text-gray-600">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </AppendixSection>
 
-            {plan.teamAccess && (
-              <AppendixSection title="팀 접근 제어">
-                <p className="text-sm text-gray-500 leading-relaxed">{plan.teamAccess}</p>
-              </AppendixSection>
-            )}
+            <AppendixSection title="팀 접근 제어">
+              <p className="text-sm text-gray-500 leading-relaxed">
+                Google OAuth 로그인 후 팀 코드 입력을 통해 접근을 제어합니다.
+                팀 코드는 환경 변수로 관리되며, 코드를 알고 있는 구성원만 플랫폼에 입장할 수 있습니다.
+              </p>
+            </AppendixSection>
 
-            {plan.checklist.length > 0 && (
-              <AppendixSection title="개발 완료 항목">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
-                  {plan.checklist.map((item) => (
-                    <div key={item} className="flex items-center gap-2 py-1">
-                      <span className="text-green-500 text-xs">✓</span>
-                      <span className="text-xs text-gray-500">{item}</span>
-                    </div>
-                  ))}
-                </div>
-              </AppendixSection>
-            )}
+            <AppendixSection title="개발 완료 항목">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                {[
+                  "Google OAuth + 팀 코드 접근 제어",
+                  "에이전트 등록·수정·삭제·제외 (GitHub CRUD)",
+                  "AI 프롬프트 자동 정제",
+                  "마스터 에이전트 자동 생성·재생성",
+                  "실시간 스트리밍 채팅 (SSE)",
+                  "Gemini Google Search 그라운딩",
+                  "이미지 생성 및 편집",
+                  "익명 피드백 & 집단 학습",
+                  "AES-256-GCM 암호화 키 저장",
+                  "멀티 모델 선택 UI",
+                  "탭 전환 시 대화 상태 유지",
+                  "모바일 반응형 레이아웃",
+                ].map((item) => (
+                  <div key={item} className="flex items-center gap-2 py-1">
+                    <span className="text-green-500 text-xs">✓</span>
+                    <span className="text-xs text-gray-500">{item}</span>
+                  </div>
+                ))}
+              </div>
+            </AppendixSection>
           </div>
 
           {/* Footer */}
@@ -325,7 +265,7 @@ export default async function PlanPage() {
   );
 }
 
-// ── Sub-components ───────────────────────────────────────────────
+/* ── Sub-components ─────────────────────────────────────────── */
 
 function Section({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
   return (
@@ -384,7 +324,7 @@ function RoadmapCard({ phase, color, items }: { phase: string; color: string; it
     green: "bg-green-50 border-green-100 text-green-700",
   };
   return (
-    <div className={`p-5 border rounded-2xl ${colors[color] ?? colors.blue}`}>
+    <div className={`p-5 border rounded-2xl ${colors[color]}`}>
       <p className="font-bold text-sm mb-3">{phase}</p>
       <ul className="space-y-2">
         {items.map((item) => (
