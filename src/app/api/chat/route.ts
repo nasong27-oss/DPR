@@ -90,8 +90,10 @@ export async function POST(req: NextRequest) {
               ? [{ type: "text" as const, text: systemPrompt, cache_control: { type: "ephemeral" as const } }]
               : undefined,
             // Only Sonnet/Opus support tool calling; Haiku does not
+            // max_uses: 3 — each search returns full web content (~100k tokens).
+            // Without a cap Claude may search 10+ times → $2-3 per query.
             ...(webSearch && modelId !== "claude-haiku-4-5-20251001"
-              ? { tools: [{ type: "web_search_20260209", name: "web_search" }] }
+              ? { tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 3 }] }
               : {}),
             messages: trimmed.map((m: ChatMessage) => ({
               role: m.role,

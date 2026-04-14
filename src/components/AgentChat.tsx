@@ -265,9 +265,9 @@ export default function AgentChat({
                     ? "bg-blue-50 border-blue-300 text-blue-700 font-medium"
                     : "border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400"
                 }`}
-                title={webSearch ? "웹 검색 켜짐 — 클릭하여 끄기" : "웹 검색 꺼짐 — 클릭하여 켜기"}
+                title={webSearch ? "웹 검색 켜짐 (최대 3회 검색) — 클릭하여 끄기" : "웹 검색 꺼짐 — 실시간 정보 필요 시 켜기 (비용 증가)"}
               >
-                🔍 웹 검색
+                🔍 웹 검색{webSearch && <span className="text-blue-400"> ·최대 3회</span>}
               </button>
             )}
           </div>
