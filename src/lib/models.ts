@@ -4,6 +4,7 @@ export interface ModelDef {
   cost: "저가" | "중가" | "고가";
   provider: "gemini" | "claude";
   description: string;
+  supportsTools?: boolean; // Claude: tool calling (web search) support
 }
 
 export const MODELS: ModelDef[] = [
@@ -65,6 +66,7 @@ export const MODELS: ModelDef[] = [
     cost: "저가",
     provider: "claude",
     description: "가장 빠른 응답 속도",
+    supportsTools: false,
   },
   {
     id: "claude-sonnet-4-6",
@@ -72,6 +74,7 @@ export const MODELS: ModelDef[] = [
     cost: "중가",
     provider: "claude",
     description: "속도와 성능의 균형",
+    supportsTools: true,
   },
   {
     id: "claude-opus-4-6",
@@ -79,6 +82,7 @@ export const MODELS: ModelDef[] = [
     cost: "고가",
     provider: "claude",
     description: "최고 성능",
+    supportsTools: true,
   },
 ];
 

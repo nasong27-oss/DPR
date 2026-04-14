@@ -57,6 +57,13 @@ export default function AgentChat({
     }
   }, [hasClaude, hasGemini]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-disable web search when switching to a model that doesn't support tools
+  useEffect(() => {
+    if (webSearch && !currentModel?.supportsTools) {
+      setWebSearch(false);
+    }
+  }, [selectedModel]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -244,7 +251,7 @@ export default function AgentChat({
                 {hasGemini ? `✨ ${currentModelLabel} · 웹 검색` : `🤖 ${currentModelLabel}`}
               </span>
             )}
-            {currentModel?.provider === "claude" && (
+            {currentModel?.supportsTools && (
               <button
                 onClick={() => setWebSearch((v) => !v)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs border transition-colors ${

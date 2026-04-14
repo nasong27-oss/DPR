@@ -89,7 +89,10 @@ export async function POST(req: NextRequest) {
             system: systemPrompt
               ? [{ type: "text" as const, text: systemPrompt, cache_control: { type: "ephemeral" as const } }]
               : undefined,
-            ...(webSearch ? { tools: [{ type: "web_search_20260209", name: "web_search" }] } : {}),
+            // Only Sonnet/Opus support tool calling; Haiku does not
+            ...(webSearch && modelId !== "claude-haiku-4-5-20251001"
+              ? { tools: [{ type: "web_search_20260209", name: "web_search" }] }
+              : {}),
             messages: trimmed.map((m: ChatMessage) => ({
               role: m.role,
               content: m.content,
