@@ -228,7 +228,7 @@ export default function AgentChat({
                   </optgroup>
                 )}
                 {claudeModels.length > 0 && (
-                  <optgroup label="🤖 Claude">
+                  <optgroup label="🤖 Claude (웹 검색)">
                     {claudeModels.map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.label} — {m.description}

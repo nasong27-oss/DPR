@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
             model: modelId || "claude-sonnet-4-6",
             max_tokens: 2048,
             system: systemPrompt || undefined,
+            tools: [{ type: "web_search_20260209", name: "web_search" }],
             messages: messages.map((m: ChatMessage) => ({
               role: m.role,
               content: m.content,
