@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
 
           const s = await anthropic.messages.stream({
             model: modelId || "claude-sonnet-4-6",
-            max_tokens: 2048,
+            max_tokens: 8192,
             system: systemPrompt || undefined,
             tools: [{ type: "web_search_20260209", name: "web_search" }],
             messages: messages.map((m: ChatMessage) => ({
@@ -94,6 +94,11 @@ export async function POST(req: NextRequest) {
               chunk.delta.type === "text_delta"
             ) {
               send(chunk.delta.text);
+            } else if (
+              chunk.type === "message_delta" &&
+              chunk.delta.stop_reason === "max_tokens"
+            ) {
+              send("\n\n*(응답이 최대 길이에 도달해 잘렸습니다. 이어서 작성해 달라고 요청해 주세요.)*");
             }
           }
           done();
