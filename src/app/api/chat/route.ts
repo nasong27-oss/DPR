@@ -82,17 +82,30 @@ export async function POST(req: NextRequest) {
           const firstUser = recent.findIndex((m) => m.role === "user");
           const trimmed = firstUser > 0 ? recent.slice(firstUser) : recent;
 
+          // When web search is on, prepend efficiency instructions to constrain
+          // Claude's search behavior. Each search result can be 100k+ tokens,
+          // so unconstrained searches lead to $2-3/query costs.
+          const WEB_SEARCH_GUIDE = `[웹 검색 효율 지침 — 반드시 준수]
+- 검색은 최대 1~2회. 유사·중복 키워드로 반복 검색 금지.
+- 검색어는 핵심 키워드 1개로 간결하게 작성 (예: "테슬라 주가 2025-04").
+- 첫 검색 결과에서 충분한 정보를 얻었으면 즉시 답변 작성, 추가 검색 중지.
+- 검색 결과 중 질문과 직접 관련된 사실만 인용. 무관한 내용은 무시.
+- 이미 알고 있는 내용이면 검색 없이 바로 답변.`;
+
+          const useWebSearch = webSearch && modelId !== "claude-haiku-4-5-20251001";
+          const effectiveSystem = useWebSearch
+            ? (systemPrompt ? `${WEB_SEARCH_GUIDE}\n\n${systemPrompt}` : WEB_SEARCH_GUIDE)
+            : systemPrompt;
+
           const s = await anthropic.messages.stream({
             model: modelId || "claude-sonnet-4-6",
             max_tokens: 8192,
-            // Cache system prompt — 10x cheaper on repeat turns ($0.30 vs $3.00/MTok)
-            system: systemPrompt
-              ? [{ type: "text" as const, text: systemPrompt, cache_control: { type: "ephemeral" as const } }]
+            // Cache effective system prompt — 10x cheaper on repeat turns
+            system: effectiveSystem
+              ? [{ type: "text" as const, text: effectiveSystem, cache_control: { type: "ephemeral" as const } }]
               : undefined,
-            // Only Sonnet/Opus support tool calling; Haiku does not
-            // max_uses: 3 — each search returns full web content (~100k tokens).
-            // Without a cap Claude may search 10+ times → $2-3 per query.
-            ...(webSearch && modelId !== "claude-haiku-4-5-20251001"
+            // max_uses: 3 as hard cap alongside the prompt instruction
+            ...(useWebSearch
               ? { tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 3 }] }
               : {}),
             messages: trimmed.map((m: ChatMessage) => ({
