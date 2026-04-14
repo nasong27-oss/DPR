@@ -92,7 +92,7 @@ export function getAvailableModels(hasClaude: boolean, hasGemini: boolean): Mode
 
 export function getDefaultModelId(hasClaude: boolean, hasGemini: boolean): string {
   if (hasGemini) return "gemini-3.1-flash-lite-preview"; // 현재 가용성 가장 높음
-  if (hasClaude) return "claude-sonnet-4-6";
+  if (hasClaude) return "claude-haiku-4-5-20251001"; // Sonnet 대비 3x 저렴
   return "";
 }
 
