@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return new Response("Unauthorized", { status: 401 });
 
-  const { messages, systemPrompt, modelId } = await req.json();
+  const { messages, systemPrompt, modelId, webSearch } = await req.json();
   if (!messages?.length) return new Response("No messages", { status: 400 });
 
   const keys = await getKeysFromCookie(session.user.email);
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
             model: modelId || "claude-sonnet-4-6",
             max_tokens: 8192,
             system: systemPrompt || undefined,
-            tools: [{ type: "web_search_20260209", name: "web_search" }],
+            ...(webSearch ? { tools: [{ type: "web_search_20260209", name: "web_search" }] } : {}),
             messages: messages.map((m: ChatMessage) => ({
               role: m.role,
               content: m.content,

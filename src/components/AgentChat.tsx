@@ -43,6 +43,7 @@ export default function AgentChat({
   const [loading, setLoading] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [webSearch, setWebSearch] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const hasAnyKey = hasClaude || hasGemini;
@@ -81,6 +82,7 @@ export default function AgentChat({
           messages: newMessages,
           systemPrompt,
           modelId: selectedModel,
+          webSearch,
         }),
       });
 
@@ -211,7 +213,7 @@ export default function AgentChat({
       {subTab === "chat" && (
         <div>
           {/* Model selector */}
-          <div className="flex items-center mb-3">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
             {availableModels.length > 1 ? (
               <select
                 value={selectedModel}
@@ -228,7 +230,7 @@ export default function AgentChat({
                   </optgroup>
                 )}
                 {claudeModels.length > 0 && (
-                  <optgroup label="🤖 Claude (웹 검색)">
+                  <optgroup label="🤖 Claude">
                     {claudeModels.map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.label} — {m.description}
@@ -241,6 +243,19 @@ export default function AgentChat({
               <span className="text-xs text-gray-500">
                 {hasGemini ? `✨ ${currentModelLabel} · 웹 검색` : `🤖 ${currentModelLabel}`}
               </span>
+            )}
+            {currentModel?.provider === "claude" && (
+              <button
+                onClick={() => setWebSearch((v) => !v)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs border transition-colors ${
+                  webSearch
+                    ? "bg-blue-50 border-blue-300 text-blue-700 font-medium"
+                    : "border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400"
+                }`}
+                title={webSearch ? "웹 검색 켜짐 — 클릭하여 끄기" : "웹 검색 꺼짐 — 클릭하여 켜기"}
+              >
+                🔍 웹 검색
+              </button>
             )}
           </div>
 
