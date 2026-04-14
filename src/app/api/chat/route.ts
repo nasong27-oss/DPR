@@ -77,12 +77,20 @@ export async function POST(req: NextRequest) {
           const Anthropic = (await import("@anthropic-ai/sdk")).default;
           const anthropic = new Anthropic({ apiKey: claudeKey });
 
+          // Keep last 20 messages to prevent unbounded cost growth
+          const recent = (messages as ChatMessage[]).slice(-20);
+          const firstUser = recent.findIndex((m) => m.role === "user");
+          const trimmed = firstUser > 0 ? recent.slice(firstUser) : recent;
+
           const s = await anthropic.messages.stream({
             model: modelId || "claude-sonnet-4-6",
             max_tokens: 8192,
-            system: systemPrompt || undefined,
+            // Cache system prompt — 10x cheaper on repeat turns ($0.30 vs $3.00/MTok)
+            system: systemPrompt
+              ? [{ type: "text" as const, text: systemPrompt, cache_control: { type: "ephemeral" as const } }]
+              : undefined,
             ...(webSearch ? { tools: [{ type: "web_search_20260209", name: "web_search" }] } : {}),
-            messages: messages.map((m: ChatMessage) => ({
+            messages: trimmed.map((m: ChatMessage) => ({
               role: m.role,
               content: m.content,
             })),

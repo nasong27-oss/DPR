@@ -55,7 +55,7 @@ ${feedback ? `\n익명 피드백:\n${feedback}` : ""}
       const Anthropic = (await import("@anthropic-ai/sdk")).default;
       const anthropic = new Anthropic({ apiKey: claudeKey });
       const msg = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 2048,
         system: REFINE_SYSTEM,
         messages: [{ role: "user", content: userPrompt }],
