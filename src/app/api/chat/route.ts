@@ -99,8 +99,19 @@ export async function POST(req: NextRequest) {
             })),
           });
 
+          const sendStatus = (status: string) => {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ status })}\n\n`)
+            );
+          };
+
           for await (const chunk of s) {
-            if (
+            if (chunk.type === "content_block_start") {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              if ((chunk as any).content_block?.type === "server_tool_use") {
+                sendStatus("searching");
+              }
+            } else if (
               chunk.type === "content_block_delta" &&
               chunk.delta.type === "text_delta"
             ) {

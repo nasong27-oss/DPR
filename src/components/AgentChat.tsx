@@ -41,6 +41,7 @@ export default function AgentChat({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [webSearch, setWebSearch] = useState(false);
@@ -113,7 +114,11 @@ export default function AgentChat({
           if (data === "[DONE]") break;
           try {
             const parsed = JSON.parse(data);
+            if (parsed.status === "searching") {
+              setIsSearching(true);
+            }
             if (parsed.text) {
+              setIsSearching(false);
               fullText += parsed.text;
               setMessages((prev) => {
                 const copy = [...prev];
@@ -142,6 +147,7 @@ export default function AgentChat({
       setMessages((prev) => prev.slice(0, -1));
     } finally {
       setLoading(false);
+      setIsSearching(false);
     }
   };
 
@@ -289,23 +295,36 @@ export default function AgentChat({
                           : "bg-gray-100 text-gray-800 rounded-bl-sm"
                       }`}
                     >
-                      {msg.role === "assistant" && msg.content === "" ? (
-                        <div className="flex gap-1">
-                          <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                          <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                          <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
-                        </div>
-                      ) : (
-                        <pre
-                          className={`whitespace-pre-wrap font-sans ${
-                            loading && i === messages.length - 1 && msg.role === "assistant"
-                              ? "streaming-cursor"
-                              : ""
-                          }`}
-                        >
-                          {msg.content}
-                        </pre>
-                      )}
+                      {(() => {
+                        const isActiveStream = loading && i === messages.length - 1 && msg.role === "assistant";
+                        if (msg.role === "assistant" && msg.content === "") {
+                          return isActiveStream && isSearching ? (
+                            <div className="flex items-center gap-2">
+                              <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                              <span className="text-xs text-blue-600">웹 검색 중...</span>
+                            </div>
+                          ) : (
+                            <div className="flex gap-1">
+                              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
+                              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
+                              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
+                            </div>
+                          );
+                        }
+                        return (
+                          <>
+                            <pre className={`whitespace-pre-wrap font-sans ${isActiveStream ? "streaming-cursor" : ""}`}>
+                              {msg.content}
+                            </pre>
+                            {isActiveStream && isSearching && (
+                              <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-gray-200">
+                                <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                                <span className="text-xs text-blue-500">웹 검색 중...</span>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                     {msg.role === "assistant" && msg.content !== "" && (
                       <button
